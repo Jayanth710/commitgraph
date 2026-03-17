@@ -9,14 +9,13 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
-    "sqlalchemy>=2.0.32",
+    "sqlalchemy[asyncio]>=2.0.32",
     "asyncpg>=0.29.0",
     "redis>=5.0.8",
     "python-dotenv>=1.0.1",
+    "httpx>=0.28.1",
+    "cryptography>=46.0.5",
 ]
-
-[tool.setuptools]
-packages = []
 
 [tool.setuptools.packages.find]
 include = ["app*", "worker*", "scheduler*"]

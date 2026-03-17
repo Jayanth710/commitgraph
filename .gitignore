@@ -1,0 +1,13 @@
+*.egg-info/
+.venv/
+__pycache__/
+
+# env files
+.env
+
+# macOS
+.DS_Store
+
+# python
+__pycache__/
+*.pyc
