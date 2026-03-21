@@ -119,3 +119,39 @@ class ExtractionResponse(BaseModel):
         default_factory=list,
         description="List of extracted commitments. Empty list if none found.",
     )
+
+
+class ExtractedJobApplication(BaseModel):
+    company_name: str = Field(description="Employer or organization name.")
+    role_title: str | None = Field(
+        default=None,
+        description="Specific role title if present in the email.",
+    )
+    status: str = Field(
+        description="Application lifecycle status: applied, assessment, interview, rejected, offer, withdrawn, or closed.",
+    )
+    summary: str = Field(description="One-line summary of the job application update.")
+    raw_text: str | None = Field(
+        default=None,
+        description="Supporting sentence(s) from the email body.",
+    )
+    date_applied: date | None = Field(
+        default=None,
+        description="Date the application was submitted if clearly stated.",
+    )
+    event_date: date | None = Field(
+        default=None,
+        description="Date of the detected application update if relevant.",
+    )
+    confidence_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence that this email is a real application event.",
+    )
+
+
+class JobApplicationExtractionResponse(BaseModel):
+    job_applications: list[ExtractedJobApplication] = Field(
+        default_factory=list,
+        description="List of extracted job application updates. Empty if none found.",
+    )
