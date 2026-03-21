@@ -60,18 +60,23 @@ async def process_normalized_item_inline(
     initial_state = {
         "normalized_item_id": str(ni["id"]),
         "account_id": str(ni["account_id"]),
-        "account_emails": account_emails,
+        "account_owner_emails": account_emails,
         "account_owner_email": primary_email,
         "subject": ni.get("subject") or "",
         "body_text": ni["body_text"],
         "sender_email": ni.get("sender_email") or "",
+        "sender_name": ni.get("sender_name"),
         "recipients": ni.get("recipients") or [],
-        "sent_at": str(ni.get("sent_at") or ""),
+        "sent_date": (
+            ni["sent_at"].strftime("%Y-%m-%d")
+            if ni.get("sent_at")
+            else None
+        ),
         "thread_id": ni.get("thread_id") or "",
         "extracted_commitments": [],
         "resolved_commitments": [],
         "stored_commitment_ids": [],
-        "review_items_created": 0,
+        "review_items_created": [],
         "deduplicated_count": 0,
     }
 

@@ -54,8 +54,20 @@ that someone made to do something. Return them as structured JSON.
 - Below 0.60: Do not extract. If you are not reasonably confident, return an empty list.
 
 ## Direction rules:
-- "outbound": The SENDER of the email is making the commitment (they promise to do something)
-- "inbound": Someone OTHER than the sender committed (e.g., "She said she would send it")
+Direction must be from the perspective of the EMAIL ACCOUNT OWNER, not just the sender.
+
+- "outbound": the account owner is the one who must do the action
+- "inbound": someone other than the account owner is the one who must do the action
+
+Rules:
+- If the email says "I will..." and the sender is the account owner, direction = "outbound"
+- If the email says "I will..." and the sender is NOT the account owner, direction = "inbound"
+- If the email tells the account owner to do something ("you need to...", "please send...", "can you review..."), direction = "outbound"
+- If the email tells someone else to do something and that someone is not the account owner, direction = "inbound"
+
+Also set:
+- owner_email = the person who must do the action
+- target_email = the person the action is owed to, if clear
 
 ## Output format:
 Return ONLY valid JSON matching this exact schema:
@@ -211,6 +223,41 @@ FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
         "role": "assistant",
         "content": json.dumps({"commitments": []}),
     },
+     # Example: Sender assigns work to the account owner
+    {
+            "role": "user",
+            "content": json.dumps({
+                "account_owner_email": "me@gmail.com",
+                "sender_email": "david@partner.io",
+                "sender_name": "David",
+                "recipients": [{"email": "me@gmail.com", "name": "Me", "type": "to"}],
+                "subject": "Action items",
+                "body_text": (
+                    "Hi,\n\n"
+                    "You need to write the API tests by March 30th.\n\n"
+                    "Thanks,\nDavid"
+                ),
+                "sent_date": "2026-03-20",
+            }),
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps({
+                "commitments": [
+                    {
+                        "summary": "Write the API tests",
+                        "raw_text": "You need to write the API tests by March 30th.",
+                        "commitment_type": "deliverable",
+                        "owner_email": "me@gmail.com",
+                        "target_email": "david@partner.io",
+                        "direction": "outbound",
+                        "due_date": "2026-03-30",
+                        "due_date_confidence": 0.95,
+                        "confidence_score": 0.95,
+                    }
+                ]
+            }),
+        },
 ]
 
 
