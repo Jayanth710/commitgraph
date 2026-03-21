@@ -67,7 +67,7 @@ async def get_weekly_digest_data(
 
     due_result = await db.execute(
         text(
-            """
+            f"""
             SELECT DISTINCT ON (c.id)
                 c.id, c.summary, c.direction, c.status, c.due_date, c.confidence_score,
                 p_owner.email_addresses[1] as owner_email,
@@ -104,7 +104,7 @@ async def get_weekly_digest_data(
 
     completed_result = await db.execute(
         text(
-            """
+            f"""
             SELECT DISTINCT ON (c.id)
                 c.id, c.summary, c.direction, c.completed_at,
                 p_target.email_addresses[1] as target_email
@@ -115,16 +115,17 @@ async def get_weekly_digest_data(
             JOIN accounts a ON a.id = ni.account_id
             WHERE a.user_id = :user_id
               AND c.completed_at >= now() - interval '7 days'
+              {extra_condition}
             ORDER BY c.id, c.completed_at DESC
             """
         ),
-        {"user_id": user_id},
+        params,
     )
     completed_rows = [_serialize_row(r) for r in completed_result.mappings().all()]
 
     overdue_result = await db.execute(
         text(
-            """
+            f"""
             SELECT DISTINCT ON (c.id)
                 c.id, c.summary, c.direction, c.due_date, c.status,
                 p_target.email_addresses[1] as target_email
@@ -135,16 +136,17 @@ async def get_weekly_digest_data(
             JOIN accounts a ON a.id = ni.account_id
             WHERE a.user_id = :user_id
               AND c.status = 'overdue'
+              {extra_condition}
             ORDER BY c.id, c.due_date ASC
             """
         ),
-        {"user_id": user_id},
+        params,
     )
     overdue_rows = [_serialize_row(r) for r in overdue_result.mappings().all()]
 
     people_result = await db.execute(
         text(
-            """
+            f"""
             SELECT
                 p.id,
                 COALESCE(p.display_name, p.email_addresses[1]) as label,
@@ -158,12 +160,13 @@ async def get_weekly_digest_data(
             JOIN accounts a ON a.id = ni.account_id
             WHERE a.user_id = :user_id
               AND c.status NOT IN ('completed', 'abandoned')
+              {extra_condition}
             GROUP BY p.id, label, email
             ORDER BY open_commitment_count DESC, label ASC
             LIMIT 5
             """
         ),
-        {"user_id": user_id},
+        params,
     )
     top_people = [_serialize_row(r) for r in people_result.mappings().all()]
 
