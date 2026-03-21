@@ -85,3 +85,51 @@ export type ReviewQueueResponse = {
   review_items: ReviewItem[];
   total: number;
 };
+
+export type JobApplicationStatus =
+  | "applied"
+  | "assessment"
+  | "interview"
+  | "rejected"
+  | "offer"
+  | "withdrawn"
+  | "closed";
+
+export type JobApplication = {
+  id: string;
+  company_name: string;
+  role_title?: string | null;
+  status: JobApplicationStatus;
+  summary: string;
+  raw_text?: string | null;
+  date_applied?: string | null;
+  last_status_at?: string | null;
+  confidence_score: number;
+  created_at?: string;
+  updated_at?: string;
+  source_thread_id?: string | null;
+  account_id?: string | null;
+  account_email?: string | null;
+};
+
+export type JobApplicationEvent = {
+  id: string;
+  event_type: string;
+  status?: JobApplicationStatus | null;
+  event_date?: string | null;
+  summary: string;
+  raw_text?: string | null;
+  created_at?: string;
+  subject?: string | null;
+  sender_email?: string | null;
+};
+
+export type JobApplicationListResponse = {
+  job_applications: JobApplication[];
+  total: number;
+};
+
+export type JobApplicationDetailResponse = {
+  job_application: JobApplication;
+  events: JobApplicationEvent[];
+};

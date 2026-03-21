@@ -208,6 +208,7 @@ async def _process_extraction(fields: dict[str, str]) -> dict:
         The final graph state (with stored_commitment_ids, etc.)
     """
     from app.agents.pipeline import extraction_graph
+    from app.services.job_application_processor import process_job_application_item
 
     normalized_item_id = fields["normalized_item_id"]
     account_id = fields["account_id"]
@@ -284,6 +285,12 @@ async def _process_extraction(fields: dict[str, str]) -> dict:
         len(reviews),
         deduped,
     )
+
+    job_result = await process_job_application_item(
+        normalized_item_id=normalized_item_id,
+        account_id=account_id,
+    )
+    final_state["job_applications_detected"] = job_result.get("applications_detected", 0)
 
     return final_state
 

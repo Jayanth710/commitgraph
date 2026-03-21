@@ -14,6 +14,7 @@ from app.routes.webhooks_gmail import router as gmail_webhook_router
 from app.routes.gmail_watch import router as gmail_watch_router
 from app.routes.gmail_normalize import router as gmail_normalize_router
 from app.routes.api import router as api_router
+from app.routes.job_applications import router as job_applications_router
 from app.routes.api import router as gmail_send_router
 from app.routes.api import router as admin_router
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,5 +49,6 @@ app.include_router(outlook_watch_router)
 app.include_router(gmail_normalize_router)
 app.include_router(gcal_sync_router)
 app.include_router(api_router)
+app.include_router(job_applications_router)
 app.include_router(gmail_send_router)
 app.include_router(admin_router)
