@@ -39,6 +39,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import AppShell from "@/components/AppShell";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { AccountFilterProvider } from "@/components/AccountFilterProvider";
 
 export const metadata: Metadata = {
   title: "CommitGraph",
@@ -51,8 +52,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-h-screen transition-colors">
         <ThemeProvider>
           <AuthProvider>
+            <AccountFilterProvider>
             <AppShell>{children}</AppShell>
             <ToastContainer position="bottom-right" autoClose={3000} theme="colored" />
+            </AccountFilterProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

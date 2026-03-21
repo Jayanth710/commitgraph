@@ -23,6 +23,7 @@ async def list_commitments(
     user: dict = Depends(get_current_user),
     status: str | None = Query(default=None),
     direction: str | None = Query(default=None),
+    account_id: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ):
@@ -36,8 +37,12 @@ async def list_commitments(
     if direction:
         conditions.append("c.direction = :direction")
         params["direction"] = direction
+    if account_id:
+        conditions.append("a.id = :account_id")
+        params["account_id"] = account_id
 
     where_clause = "WHERE " + " AND ".join(conditions)
+
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -287,7 +292,7 @@ async def update_commitment(
                         c.id, c.summary, c.raw_text, c.direction, c.status,
                         c.commitment_type, c.confidence_score,
                         c.due_date, c.due_date_confidence,
-                        c.created_at, c.updated_at, c.completed_at, c.detected_at, c.calendar_event_id,
+                        c.created_at, c.updated_at, c.completed_at, c.detected_at, c.calendar_event_id, c.calendar_event_link,
                         p_owner.display_name as owner_name,
                         p_owner.email_addresses[1] as owner_email,
                         p_owner.is_self as owner_is_self,
@@ -392,6 +397,7 @@ async def search_commitments(
     q: str = Query(default="", min_length=0),
     status: str | None = Query(default=None),
     direction: str | None = Query(default=None),
+    account_id: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
 ):
     user_id = str(user["id"])
@@ -407,6 +413,9 @@ async def search_commitments(
     if direction:
         conditions.append("c.direction = :direction")
         params["direction"] = direction
+    if account_id:
+        conditions.append("a.id = :account_id")
+        params["account_id"] = account_id
 
     where_clause = "WHERE " + " AND ".join(conditions)
 
@@ -441,13 +450,24 @@ async def search_commitments(
     return {"commitments": [_serialize_row(r) for r in rows], "total": len(rows)}
 
 @router.get("/review-queue")
-async def list_review_queue(user: dict = Depends(get_current_user)):
+async def list_review_queue(
+    user: dict = Depends(get_current_user),
+    account_id: str | None = Query(default=None),
+):
     user_id = str(user["id"])
+    conditions = ["rq.status = 'pending'", "a.user_id = :user_id"]
+    params: dict[str, Any] = {"user_id": user_id}
+
+    if account_id:
+        conditions.append("a.id = :account_id")
+        params["account_id"] = account_id
+
+    where_clause = "WHERE " + " AND ".join(conditions)
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             text(
-                """
+                f"""
                 SELECT
                     rq.id, rq.reason, rq.suggested_action, rq.status as review_status,
                     rq.created_at as review_created_at,
@@ -465,11 +485,11 @@ async def list_review_queue(user: dict = Depends(get_current_user)):
                 LEFT JOIN evidence_links e ON e.commitment_id = c.id AND e.evidence_type = 'origin'
                 LEFT JOIN normalized_items n ON n.id = e.normalized_item_id
                 LEFT JOIN accounts a ON a.id = n.account_id
-                WHERE rq.status = 'pending' AND a.user_id = :user_id
+                {where_clause}
                 ORDER BY rq.created_at DESC
                 """
             ),
-            {"user_id": user_id},
+            params,
         )
         rows = result.mappings().all()
 
@@ -711,13 +731,22 @@ async def list_timeline(
 
 
 @router.get("/persons")
-async def list_persons(user: dict = Depends(get_current_user)):
+async def list_persons(
+    user: dict = Depends(get_current_user),
+    account_id: str | None = Query(default=None),
+):
     user_id = str(user["id"])
+    params: dict[str, Any] = {"user_id": user_id}
+    extra_condition = ""
+
+    if account_id:
+        extra_condition = " AND a.id = :account_id "
+        params["account_id"] = account_id
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             text(
-                """
+                f"""
                 SELECT
                     p.id, p.display_name, p.email_addresses, p.is_self,
                     p.first_seen_at, p.last_seen_at,
@@ -728,12 +757,13 @@ async def list_persons(user: dict = Depends(get_current_user)):
                 LEFT JOIN normalized_items ni ON ni.id = el.normalized_item_id
                 LEFT JOIN accounts a ON a.id = ni.account_id
                 WHERE a.user_id = :user_id
+                {extra_condition}
                 GROUP BY p.id
                 HAVING count(DISTINCT c.id) > 0
                 ORDER BY count(DISTINCT c.id) DESC, p.last_seen_at DESC
                 """
             ),
-            {"user_id": user_id},
+            params,
         )
         rows = result.mappings().all()
 
@@ -792,13 +822,22 @@ async def disconnect_account(account_id: str, user: dict = Depends(get_current_u
 
 
 @router.get("/stats")
-async def get_stats(user: dict = Depends(get_current_user)):
+async def get_stats(
+    user: dict = Depends(get_current_user),
+    account_id: str | None = Query(default=None),
+):
     user_id = str(user["id"])
+    params: dict[str, Any] = {"user_id": user_id}
+    extra_condition = ""
+
+    if account_id:
+        extra_condition = " AND a.id = :account_id "
+        params["account_id"] = account_id
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             text(
-                """
+                f"""
                 SELECT
                     count(DISTINCT c.id) FILTER (WHERE c.status NOT IN ('completed', 'abandoned')) as open_count,
                     count(DISTINCT c.id) FILTER (WHERE c.status = 'overdue') as overdue_count,
@@ -810,24 +849,27 @@ async def get_stats(user: dict = Depends(get_current_user)):
                 JOIN normalized_items ni ON ni.id = el.normalized_item_id
                 JOIN accounts a ON a.id = ni.account_id
                 WHERE a.user_id = :user_id
+                {extra_condition}
                 """
             ),
-            {"user_id": user_id},
+            params,
         )
         stats = result.mappings().first()
 
         review_result = await db.execute(
             text(
-                """
-                SELECT count(*) FROM review_queue rq
+                f"""
+                SELECT count(*)
+                FROM review_queue rq
                 JOIN commitments c ON c.id = rq.commitment_id
                 JOIN evidence_links el ON el.commitment_id = c.id
                 JOIN normalized_items ni ON ni.id = el.normalized_item_id
                 JOIN accounts a ON a.id = ni.account_id
                 WHERE rq.status = 'pending' AND a.user_id = :user_id
+                {extra_condition}
                 """
             ),
-            {"user_id": user_id},
+            params,
         )
         review_count = review_result.scalar()
 
@@ -846,14 +888,23 @@ def _serialize_row(row) -> dict:
     return d
 
 @router.get("/stats/chart")
-async def get_chart_data(user: dict = Depends(get_current_user)):
+async def get_chart_data(
+    user: dict = Depends(get_current_user),
+    account_id: str | None = Query(default=None),
+):
     """Commitments over time for the past 30 days."""
     user_id = str(user["id"])
+    params: dict[str, Any] = {"user_id": user_id}
+    extra_condition = ""
+
+    if account_id:
+        extra_condition = " AND a.id = :account_id "
+        params["account_id"] = account_id
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             text(
-                """
+                f"""
                 SELECT
                     date_trunc('day', c.detected_at)::date as day,
                     count(DISTINCT c.id) FILTER (WHERE c.direction = 'outbound') as outbound,
@@ -864,23 +915,31 @@ async def get_chart_data(user: dict = Depends(get_current_user)):
                 JOIN accounts a ON a.id = ni.account_id
                 WHERE a.user_id = :user_id
                   AND c.detected_at >= now() - interval '30 days'
+                  {extra_condition}
                 GROUP BY date_trunc('day', c.detected_at)::date
                 ORDER BY day ASC
                 """
             ),
-            {"user_id": user_id},
+            params,
         )
         rows = result.mappings().all()
 
     return {"chart_data": [_serialize_row(r) for r in rows]}
 
 @router.get("/digest/weekly")
-async def weekly_digest(user: dict = Depends(get_current_user)):
+async def weekly_digest(
+    user: dict = Depends(get_current_user),
+    account_id: str | None = Query(default=None),
+):
     from app.services.dashboard_queries import get_weekly_digest_data
 
     user_id = str(user["id"])
     async with AsyncSessionLocal() as db:
-        return await get_weekly_digest_data(db, user_id=user_id)
+        return await get_weekly_digest_data(
+            db,
+            user_id=user_id,
+            account_id=account_id,
+        )
 
 @router.post("/commitments/{commitment_id}/calendar-event")
 async def create_calendar_event_for_commitment(

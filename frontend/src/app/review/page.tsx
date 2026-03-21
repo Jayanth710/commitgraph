@@ -6,17 +6,21 @@ import EmptyState from "@/components/EmptyState";
 import { CheckCircle, Pencil, Merge } from "lucide-react";
 import PageTransition from "@/components/PageTransition";
 import type { ReviewItem } from "@/lib/types";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 
 export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingItem, setEditingItem] = useState<ReviewItem | null>(null);
   const [mergingItem, setMergingItem] = useState<ReviewItem | null>(null);
+  const { activeAccountId } = useAccountFilter();
 
   useEffect(() => {
-    async function load() {
+        async function load() {
       try {
-        const data = await api.getReviewQueue();
+        const params = new URLSearchParams();
+        if (activeAccountId) params.set("account_id", activeAccountId);
+        const data = await api.getReviewQueue(params.toString());
         setItems(data.review_items);
       } catch (err) {
         console.error(err);
@@ -25,7 +29,7 @@ export default function ReviewPage() {
       }
     }
     load();
-  }, []);
+  }, [activeAccountId]);
 
   const handleAction = async (reviewId: string, action: string) => {
     try {

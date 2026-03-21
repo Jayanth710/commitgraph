@@ -5,15 +5,19 @@ import { ListSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
 import PageTransition from "@/components/PageTransition";
 import { Users } from "lucide-react";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 
 export default function PersonsPage() {
   const [persons, setPersons] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const {activeAccountId} = useAccountFilter()
 
   useEffect(() => {
-    async function load() {
+        async function load() {
       try {
-        const data = await api.getPersons();
+        const params = new URLSearchParams();
+        if (activeAccountId) params.set("account_id", activeAccountId);
+        const data = await api.getPersons(params.toString());
         setPersons(data.persons);
       } catch (err) {
         console.error(err);
@@ -22,7 +26,7 @@ export default function PersonsPage() {
       }
     }
     load();
-  }, []);
+  }, [activeAccountId]);
 
   if (loading) return <ListSkeleton count={4} />;
 

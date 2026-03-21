@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { ListSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
 import PageTransition from "@/components/PageTransition";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 import {
   CalendarDays,
   CheckCircle,
@@ -18,11 +19,14 @@ import {
 export default function DigestPage() {
   const [digest, setDigest] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const {activeAccountId} = useAccountFilter()
 
   useEffect(() => {
-    async function load() {
+        async function load() {
       try {
-        const data = await api.getWeeklyDigest();
+        const params = new URLSearchParams();
+        if (activeAccountId) params.set("account_id", activeAccountId);
+        const data = await api.getWeeklyDigest(params.toString());
         setDigest(data);
       } catch (err) {
         console.error(err);
@@ -31,7 +35,7 @@ export default function DigestPage() {
       }
     }
     load();
-  }, []);
+  }, [activeAccountId]);
 
   if (loading) return <ListSkeleton count={5} />;
 
