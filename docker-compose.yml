@@ -13,6 +13,7 @@ services:
     volumes:
       - commitgraph_postgres_data:/var/lib/postgresql/data
       - ./backend/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+      - ./backend/migrations/002_users.sql:/docker-entrypoint-initdb.d/002_users.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U commitgraph -d commitgraph"]
       interval: 5s
@@ -102,6 +103,33 @@ services:
       api:
         condition: service_healthy
     command: ["python", "-m", "worker.main", "extractor"]
+
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: commitgraph-scheduler
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://commitgraph:commitgraph@postgres:5432/commitgraph
+      REDIS_URL: redis://redis:6379/0
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "scheduler.main"]
+  
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: commitgraph-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
 
   ngrok:
     image: ngrok/ngrok:latest

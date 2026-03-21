@@ -1,0 +1,161 @@
+"""
+Commitment reconciliation: detect duplicates before storing.
+
+When the same email thread generates multiple notifications (retries, 
+multiple accounts seeing the same thread, follow-up emails about the 
+same commitment), the extraction pipeline can produce duplicate commitments.
+
+This module checks for existing commitments that match a candidate before
+storing it. The matching logic uses multiple signals:
+
+    1. Same thread_id + same owner → very likely duplicate
+    2. Same owner + same target + similar summary text → probable duplicate
+    3. Same owner + similar summary within 7 days → possible duplicate
+
+If a duplicate is found:
+    - Add an evidence_link (type='update') to the existing commitment
+    - Do NOT create a new commitment row
+    - Return the existing commitment ID
+
+If ambiguous:
+    - Create a review_queue entry with reason='possible_duplicate'
+    - Let the user decide
+
+If no match:
+    - Proceed with normal storage (new commitment row)
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+
+def _word_set(text_str: str) -> set[str]:
+    """Extract a set of lowercase words for overlap comparison.
+    
+    Strips common filler words to focus on meaningful content.
+    """
+    if not text_str:
+        return set()
+    
+    stop_words = {
+        "i", "me", "my", "the", "a", "an", "to", "for", "of", "and",
+        "will", "by", "you", "your", "it", "in", "on", "is", "be",
+        "that", "this", "with", "have", "also", "them", "their",
+    }
+    words = set(text_str.lower().split())
+    return words - stop_words
+
+
+def compute_similarity(summary_a: str, summary_b: str) -> float:
+    """Compute word-overlap similarity between two summaries.
+    
+    Returns a float between 0.0 and 1.0.
+    Uses Jaccard similarity: |intersection| / |union|
+    
+    This is intentionally simple. For v1, keyword overlap catches
+    the obvious duplicates ("Send Q3 proposal" vs "Send Q3 proposal to Sarah").
+    A future version could use embedding similarity via pgvector.
+    """
+    words_a = _word_set(summary_a)
+    words_b = _word_set(summary_b)
+    
+    if not words_a or not words_b:
+        return 0.0
+    
+    intersection = words_a & words_b
+    union = words_a | words_b
+    
+    return len(intersection) / len(union)
+
+
+async def find_duplicate_commitment(
+    db: AsyncSession,
+    *,
+    owner_person_id: str,
+    target_person_id: str | None,
+    summary: str,
+    thread_id: str | None,
+    similarity_threshold: float = 0.6,
+) -> dict[str, Any] | None:
+    """Search for an existing commitment that matches the candidate.
+    
+    Matching priority:
+    1. Same thread + same owner → check summary similarity
+    2. Same owner + same target + similar summary within 14 days
+    
+    Returns the matching commitment dict if found, None otherwise.
+    """
+    
+    # Strategy 1: Same thread + same owner.
+    # This is the strongest signal — same email thread, same person committing.
+    if thread_id:
+        result = await db.execute(
+            text(
+                """
+                SELECT c.id, c.summary, c.status, c.confidence_score
+                FROM commitments c
+                JOIN evidence_links e ON e.commitment_id = c.id
+                JOIN normalized_items n ON n.id = e.normalized_item_id
+                WHERE c.owner_person_id = :owner_person_id
+                  AND n.thread_id = :thread_id
+                  AND c.status NOT IN ('abandoned')
+                ORDER BY c.created_at DESC
+                LIMIT 10
+                """
+            ),
+            {
+                "owner_person_id": owner_person_id,
+                "thread_id": thread_id,
+            },
+        )
+        
+        for row in result.mappings().all():
+            sim = compute_similarity(summary, row["summary"])
+            if sim >= similarity_threshold:
+                logger.info(
+                    "Duplicate found (thread match): existing=%s similarity=%.2f "
+                    "existing_summary=%r new_summary=%r",
+                    row["id"], sim, row["summary"], summary,
+                )
+                return dict(row)
+    
+    # Strategy 2: Same owner + same target + similar summary, recent.
+    # Catches cross-thread duplicates (e.g., forwarded email about same topic).
+    if target_person_id:
+        result = await db.execute(
+            text(
+                """
+                SELECT id, summary, status, confidence_score
+                FROM commitments
+                WHERE owner_person_id = :owner_person_id
+                  AND target_person_id = :target_person_id
+                  AND status NOT IN ('abandoned')
+                  AND created_at > now() - interval '14 days'
+                ORDER BY created_at DESC
+                LIMIT 10
+                """
+            ),
+            {
+                "owner_person_id": owner_person_id,
+                "target_person_id": target_person_id,
+            },
+        )
+        
+        for row in result.mappings().all():
+            sim = compute_similarity(summary, row["summary"])
+            if sim >= similarity_threshold:
+                logger.info(
+                    "Duplicate found (owner+target match): existing=%s similarity=%.2f "
+                    "existing_summary=%r new_summary=%r",
+                    row["id"], sim, row["summary"], summary,
+                )
+                return dict(row)
+    
+    return None

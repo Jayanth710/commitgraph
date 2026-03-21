@@ -1,21 +1,22 @@
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
+import ssl as ssl_module
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 from app.core.config import get_settings
 
 settings = get_settings()
 
+connect_args = {}
+if settings.app_env == "production":
+    ssl_ctx = ssl_module.create_default_context()
+    connect_args["ssl"] = ssl_ctx
+
 engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    future=True,
+    settings.async_database_url,
     pool_pre_ping=True,
+    connect_args=connect_args,
 )
 
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def get_db():

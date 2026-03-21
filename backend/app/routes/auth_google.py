@@ -1,7 +1,11 @@
 import secrets
+import logging
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+
+from sqlalchemy import text
 
 from app.db.session import AsyncSessionLocal
 from app.services.google_oauth import (
@@ -11,23 +15,40 @@ from app.services.google_oauth import (
     upsert_gmail_account,
 )
 
+from app.core.config import get_settings
+
+settings = get_settings()
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth/google", tags=["google-auth"])
 
 
 @router.get("/start")
-async def google_auth_start():
-    state = secrets.token_urlsafe(32)
-    auth_url = build_google_auth_url(state)
+async def google_auth_start(request: Request):
+    import json, base64
 
-    response = RedirectResponse(url=auth_url, status_code=302)
-    response.set_cookie(
-        key="google_oauth_state",
-        value=state,
-        httponly=True,
-        samesite="lax",
-        max_age=600,
-    )
-    return response
+    state_token = secrets.token_urlsafe(32)
+    
+    # Get user_id from query param
+    user_id = request.query_params.get("user_id", "")
+    
+    # Encode both into the state parameter
+    state_data = json.dumps({"token": state_token, "user_id": user_id})
+    state = base64.urlsafe_b64encode(state_data.encode()).decode()
+
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.google_redirect_uri,
+        "response_type": "code",
+        "scope": settings.google_oauth_scope,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return RedirectResponse(url=auth_url, status_code=302)
 
 
 @router.get("/callback")
@@ -37,26 +58,34 @@ async def google_auth_callback(
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ):
+    import json, base64
+
     if error:
-        raise HTTPException(status_code=400, detail=f"Google OAuth error: {error}")
+        return RedirectResponse(url=f"{settings.frontend_url}/settings?error={error}", status_code=302)
 
     if not code:
-        raise HTTPException(status_code=400, detail="Missing authorization code")
+        return RedirectResponse(url=f"{settings.frontend_url}/settings?error=missing_code", status_code=302)
 
-    cookie_state = request.cookies.get("google_oauth_state")
-    if not state or not cookie_state or state != cookie_state:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    if not state:
+        return RedirectResponse(url=f"{settings.frontend_url}/settings?error=missing_state", status_code=302)
+
+    # Decode state
+    try:
+        state_data = json.loads(base64.urlsafe_b64decode(state).decode())
+        user_id = state_data.get("user_id", "")
+    except Exception:
+        return RedirectResponse(url=f"{settings.frontend_url}/settings?error=invalid_state", status_code=302)
 
     token_data = await exchange_code_for_tokens(code)
 
     access_token = token_data.get("access_token")
     if not access_token:
-        raise HTTPException(status_code=400, detail="No access token returned by Google")
+        return RedirectResponse(url=f"{settings.frontend_url}/settings?error=no_token", status_code=302)
 
     profile = await fetch_gmail_profile(access_token)
     email_address = profile.get("emailAddress")
     if not email_address:
-        raise HTTPException(status_code=400, detail="Could not determine Gmail address")
+        return RedirectResponse(url=f"{settings.frontend_url}/settings?error=no_email", status_code=302)
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -66,16 +95,20 @@ async def google_auth_callback(
                 gmail_profile=profile,
             )
 
-    response = JSONResponse(
-        {
-            "message": "Google account connected successfully",
-            "account_id": str(account["id"]),
-            "email_address": account["email_address"],
-            "history_id": account["history_id"],
-            "watch_expiry": account["watch_expiry"],
-            "scope": token_data.get("scope"),
-            "token_type": token_data.get("token_type"),
-        }
+    # Link account to user
+    if user_id:
+        try:
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    await session.execute(
+                        text("UPDATE accounts SET user_id = :uid WHERE email_address = :email AND user_id IS NULL"),
+                        {"uid": user_id, "email": account["email_address"]},
+                    )
+        except Exception as e:
+            logger.error("Failed to link account to user: %s", e)
+
+    response = RedirectResponse(
+        url=f"{settings.frontend_url}/settings?connected={account['email_address']}",
+        status_code=302,
     )
-    response.delete_cookie("google_oauth_state")
     return response

@@ -1,0 +1,366 @@
+"""
+Commitment extraction from emails.
+
+This module contains:
+    1. The extraction prompt (with few-shot examples)
+    2. The function that calls the LLM and parses the response
+    3. Retry logic for malformed LLM output
+
+The prompt design follows three principles:
+    - Few-shot examples teach the model what IS and ISN'T a commitment
+    - Structured JSON output with a strict schema prevents free-form responses
+    - The system message anchors the model's role and scoring criteria
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import date
+
+from app.services.llm import llm_completion
+from app.services.schemas import ExtractionResponse
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# System prompt — defines the LLM's role and scoring rules
+# ---------------------------------------------------------------------------
+EXTRACTION_SYSTEM_PROMPT = """\
+You are CommitGraph's commitment extraction engine.
+
+Your job: given an email, identify ACTIONABLE COMMITMENTS — specific promises
+that someone made to do something. Return them as structured JSON.
+
+## What IS a commitment:
+- "I'll send the proposal by Friday" → deliverable, high confidence
+- "I'll get back to you on Monday with the numbers" → follow_up, high confidence
+- "Can you review this by end of week?" → review (inbound from the recipient's perspective), high confidence
+- "Let me check with the team and circle back" → follow_up, medium confidence
+
+## What is NOT a commitment:
+- "Thanks for the update!" → social pleasantry, NOT a commitment
+- "Sounds good" → acknowledgment, NOT a commitment
+- "We should grab coffee sometime" → vague social plan, NOT a commitment
+- "Let me know if you have questions" → standing offer, NOT a commitment
+- "Hope you're doing well" → greeting, NOT a commitment
+- Newsletter content, marketing emails, automated notifications → NEVER commitments
+
+## Scoring rules for confidence_score:
+- 0.90-1.00: Explicit, unambiguous promise with a clear action ("I will send X by Y")
+- 0.75-0.89: Strong implication of commitment ("I should have that ready next week")
+- 0.60-0.74: Probable but vague ("Let me look into that", "I'll try to get to it")
+- Below 0.60: Do not extract. If you are not reasonably confident, return an empty list.
+
+## Direction rules:
+- "outbound": The SENDER of the email is making the commitment (they promise to do something)
+- "inbound": Someone OTHER than the sender committed (e.g., "She said she would send it")
+
+## Output format:
+Return ONLY valid JSON matching this exact schema:
+{
+  "commitments": [
+    {
+      "summary": "...",
+      "raw_text": "...",
+      "commitment_type": "deliverable|follow_up|response_needed|meeting_prep|review|decision|other",
+      "owner_email": "...",
+      "target_email": "..." or null,
+      "direction": "outbound|inbound",
+      "due_date": "YYYY-MM-DD" or null,
+      "due_date_confidence": 0.0-1.0,
+      "confidence_score": 0.0-1.0
+    }
+  ]
+}
+
+If no commitments are found, return: {"commitments": []}
+
+Do NOT wrap in markdown code fences. Return raw JSON only.\
+"""
+
+
+# ---------------------------------------------------------------------------
+# Few-shot examples — the most effective prompt engineering technique
+#
+# These examples teach the model:
+#   1. What a clear outbound commitment looks like
+#   2. What an inbound commitment looks like
+#   3. That newsletter/automated emails have NO commitments
+#   4. That vague social plans are NOT commitments
+#   5. How to handle multiple commitments in one email
+# ---------------------------------------------------------------------------
+FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
+    # Example 1: Clear outbound commitment with deadline
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "me@gmail.com",
+            "sender_email": "me@gmail.com",
+            "sender_name": "Me",
+            "recipients": [{"email": "sarah@company.com", "name": "Sarah Chen", "type": "to"}],
+            "subject": "Re: Q3 Proposal",
+            "body_text": (
+                "Hi Sarah,\n\n"
+                "Thanks for the feedback. I'll have the revised proposal to you "
+                "by end of day Friday. I'll also include the updated budget numbers "
+                "that finance sent over.\n\n"
+                "Best,\nMe"
+            ),
+            "sent_date": "2026-03-17",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({
+            "commitments": [
+                {
+                    "summary": "Send revised Q3 proposal with updated budget numbers to Sarah",
+                    "raw_text": "I'll have the revised proposal to you by end of day Friday. I'll also include the updated budget numbers that finance sent over.",
+                    "commitment_type": "deliverable",
+                    "owner_email": "me@gmail.com",
+                    "target_email": "sarah@company.com",
+                    "direction": "outbound",
+                    "due_date": "2026-03-20",
+                    "due_date_confidence": 0.85,
+                    "confidence_score": 0.95,
+                },
+            ],
+        }),
+    },
+    # Example 2: Inbound commitment — someone promises to the account owner
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "me@gmail.com",
+            "sender_email": "david@partner.io",
+            "sender_name": "David Park",
+            "recipients": [{"email": "me@gmail.com", "name": "Me", "type": "to"}],
+            "subject": "API Integration Timeline",
+            "body_text": (
+                "Hey,\n\n"
+                "I spoke with our engineering lead. We'll have the sandbox API "
+                "credentials ready for you by next Tuesday. I'll send them over "
+                "as soon as they're provisioned.\n\n"
+                "Cheers,\nDavid"
+            ),
+            "sent_date": "2026-03-17",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({
+            "commitments": [
+                {
+                    "summary": "David will send sandbox API credentials",
+                    "raw_text": "We'll have the sandbox API credentials ready for you by next Tuesday. I'll send them over as soon as they're provisioned.",
+                    "commitment_type": "deliverable",
+                    "owner_email": "david@partner.io",
+                    "target_email": "me@gmail.com",
+                    "direction": "inbound",
+                    "due_date": "2026-03-24",
+                    "due_date_confidence": 0.80,
+                    "confidence_score": 0.92,
+                },
+            ],
+        }),
+    },
+    # Example 3: Newsletter — no commitments at all
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "me@gmail.com",
+            "sender_email": "newsletter@techdigest.com",
+            "sender_name": "Tech Digest Weekly",
+            "recipients": [{"email": "me@gmail.com", "name": None, "type": "to"}],
+            "subject": "This Week in AI: March 17, 2026",
+            "body_text": (
+                "TOP STORIES THIS WEEK\n\n"
+                "1. OpenAI announces GPT-5 preview\n"
+                "2. Google DeepMind publishes new robotics paper\n"
+                "3. EU AI Act enforcement begins next month\n\n"
+                "Read more at techdigest.com"
+            ),
+            "sent_date": "2026-03-17",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({"commitments": []}),
+    },
+    # Example 4: Vague social — NOT a commitment
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "me@gmail.com",
+            "sender_email": "alex@friend.com",
+            "sender_name": "Alex",
+            "recipients": [{"email": "me@gmail.com", "name": "Me", "type": "to"}],
+            "subject": "Re: Catching up",
+            "body_text": (
+                "Hey! Great to hear from you.\n\n"
+                "We should definitely grab lunch sometime soon. "
+                "It's been way too long! Let me know when you're free.\n\n"
+                "Alex"
+            ),
+            "sent_date": "2026-03-17",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({"commitments": []}),
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Extraction function
+# ---------------------------------------------------------------------------
+def _build_email_payload(
+    *,
+    account_owner_email: str,
+    sender_email: str,
+    sender_name: str | None,
+    recipients: list[dict],
+    subject: str | None,
+    body_text: str | None,
+    sent_date: str | None,
+) -> str:
+    """Build the JSON payload that gets sent to the LLM as the user message."""
+    return json.dumps(
+        {
+            "account_owner_email": account_owner_email,
+            "sender_email": sender_email,
+            "sender_name": sender_name,
+            "recipients": recipients,
+            "subject": subject or "(no subject)",
+            "body_text": (body_text or "")[:4000],  # Truncate huge emails
+            "sent_date": sent_date,
+        },
+        ensure_ascii=False,
+    )
+
+
+async def extract_commitments(
+    *,
+    account_owner_email: str,
+    sender_email: str,
+    sender_name: str | None,
+    recipients: list[dict],
+    subject: str | None,
+    body_text: str | None,
+    sent_date: str | None,
+) -> ExtractionResponse:
+    """
+    Extract commitments from a single email.
+
+    This is the core AI function of CommitGraph. It:
+    1. Builds a message list: system prompt + few-shot examples + this email
+    2. Calls the LLM via llm_completion (which handles model routing/fallbacks)
+    3. Parses the JSON response into Pydantic models
+    4. Retries once if the LLM returns invalid JSON
+
+    Returns:
+        ExtractionResponse with a list of ExtractedCommitment objects.
+        May be empty if no commitments were found.
+    """
+    email_payload = _build_email_payload(
+        account_owner_email=account_owner_email,
+        sender_email=sender_email,
+        sender_name=sender_name,
+        recipients=recipients,
+        subject=subject,
+        body_text=body_text,
+        sent_date=sent_date,
+    )
+
+    messages = [
+        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+        *FEW_SHOT_EXAMPLES,
+        {"role": "user", "content": email_payload},
+    ]
+
+    # First attempt.
+    result = await llm_completion(
+        task="commitment_extraction",
+        messages=messages,
+        response_format={"type": "json_object"},
+    )
+
+    try:
+        parsed = _parse_extraction_response(result.content)
+        logger.info(
+            "Extracted %d commitments from email subject=%r model=%s cost=$%.6f",
+            len(parsed.commitments),
+            subject,
+            result.model,
+            result.cost_usd,
+        )
+        return parsed
+
+    except (json.JSONDecodeError, ValueError) as first_error:
+        logger.warning(
+            "LLM returned invalid JSON on first attempt (model=%s): %s. Retrying...",
+            result.model,
+            first_error,
+        )
+
+    # Retry with an explicit correction message.
+    messages.append({"role": "assistant", "content": result.content})
+    messages.append({
+        "role": "user",
+        "content": (
+            "Your response was not valid JSON. "
+            "Return ONLY a raw JSON object with a 'commitments' key. "
+            "No markdown, no explanation, no code fences."
+        ),
+    })
+
+    retry_result = await llm_completion(
+        task="commitment_extraction",
+        messages=messages,
+        response_format={"type": "json_object"},
+    )
+
+    try:
+        parsed = _parse_extraction_response(retry_result.content)
+        logger.info(
+            "Retry succeeded: %d commitments from email subject=%r",
+            len(parsed.commitments),
+            subject,
+        )
+        return parsed
+
+    except (json.JSONDecodeError, ValueError) as retry_error:
+        logger.error(
+            "LLM returned invalid JSON on retry too (model=%s): %s. "
+            "Returning empty extraction.",
+            retry_result.model,
+            retry_error,
+        )
+        return ExtractionResponse(commitments=[])
+
+
+def _parse_extraction_response(raw: str) -> ExtractionResponse:
+    """Parse the LLM's raw string into a validated ExtractionResponse.
+
+    Handles common LLM quirks:
+    - Markdown code fences around JSON
+    - Extra whitespace
+    - Minor schema deviations that Pydantic can coerce
+    """
+    cleaned = raw.strip()
+
+    # Strip markdown code fences if the LLM wrapped its response.
+    if cleaned.startswith("```"):
+        # Remove opening fence (```json or ```)
+        first_newline = cleaned.index("\n")
+        cleaned = cleaned[first_newline + 1:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+
+    cleaned = cleaned.strip()
+
+    # Parse and validate via Pydantic.
+    return ExtractionResponse.model_validate_json(cleaned)

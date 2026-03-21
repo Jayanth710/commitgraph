@@ -1,9 +1,9 @@
 from fastapi import APIRouter
 from sqlalchemy import text
-from redis import asyncio as aioredis
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.services.redis_streams import check_redis_health
 
 router = APIRouter()
 settings = get_settings()
@@ -25,9 +25,9 @@ async def health() -> dict:
         db_error = str(e)
 
     try:
-        redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-        redis_ok = await redis.ping()
-        await redis.aclose()
+        redis_ok = await check_redis_health()
+        if not redis_ok:
+            redis_error = "check returned False"
     except Exception as e:
         redis_ok = False
         redis_error = str(e)

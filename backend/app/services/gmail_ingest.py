@@ -4,11 +4,15 @@ import json
 import logging
 from typing import Any
 
+from app.services.inline_processor import process_normalized_item_inline
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.session import AsyncSessionLocal
+from app.core.config import get_settings
 
 from app.services.gmail_api import (
+    GmailApiError,
     GmailHistoryExpiredError,
     get_full_message,
     list_new_message_ids,
@@ -17,6 +21,7 @@ from app.services.gmail_normalize import normalize_gmail_source_item
 # from app.services.redis_streams import publish_normalized_event
 from app.services.redis_streams import publish_normalized_event_once
 
+settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +36,8 @@ async def process_gmail_push_notification(
     email_address: str,
     latest_history_id: str,
 ) -> dict[str, Any]:
+    normalized_ids = []  # Collect for post-commit extraction
+
     try:
         async with db.begin():
             account = await _lock_gmail_account_by_email(db, email_address)
@@ -40,10 +47,7 @@ async def process_gmail_push_notification(
                 return {
                     "status": "ignored",
                     "reason": "account_not_found",
-                    "inserted": 0,
-                    "skipped": 0,
-                    "normalized": 0,
-                    "emitted": 0,
+                    "inserted": 0, "skipped": 0, "normalized": 0, "emitted": 0,
                 }
 
             previous_history_id = (
@@ -52,29 +56,19 @@ async def process_gmail_push_notification(
 
             if previous_history_id is None:
                 await _update_account_history_id(
-                    db,
-                    account_id=str(account["id"]),
-                    history_id=latest_history_id,
+                    db, account_id=str(account["id"]), history_id=latest_history_id,
                 )
                 logger.info(
                     "Bootstrapped Gmail history cursor for account_id=%s history_id=%s",
-                    account["id"],
-                    latest_history_id,
+                    account["id"], latest_history_id,
                 )
                 return {
                     "status": "bootstrapped",
-                    "inserted": 0,
-                    "skipped": 0,
-                    "normalized": 0,
-                    "emitted": 0,
+                    "inserted": 0, "skipped": 0, "normalized": 0, "emitted": 0,
                     "history_id": latest_history_id,
                 }
 
-            message_ids = await list_new_message_ids(
-                db,
-                account,
-                previous_history_id,
-            )
+            message_ids = await list_new_message_ids(db, account, previous_history_id)
 
             inserted = 0
             skipped = 0
@@ -85,8 +79,7 @@ async def process_gmail_push_notification(
                 idempotency_key = build_idempotency_key(str(account["id"]), message_id)
 
                 existing_source = await _get_source_item_by_idempotency(
-                    db,
-                    idempotency_key=idempotency_key,
+                    db, idempotency_key=idempotency_key,
                 )
 
                 if existing_source:
@@ -94,7 +87,14 @@ async def process_gmail_push_notification(
                     source_item_id = str(existing_source["id"])
                     provider_id = str(existing_source["provider_id"])
                 else:
-                    full_message = await get_full_message(db, account, message_id)
+                    try:
+                        full_message = await get_full_message(db, account, message_id)
+                    except GmailApiError as exc:
+                        if "404" in str(exc) or "NOT_FOUND" in str(exc):
+                            logger.warning("Message %s not found (deleted/spam?), skipping", message_id)
+                            skipped += 1
+                            continue
+                        raise
 
                     source_item_id = await _insert_source_item(
                         db,
@@ -106,13 +106,10 @@ async def process_gmail_push_notification(
 
                     if source_item_id is None:
                         fallback_source = await _get_source_item_by_idempotency(
-                            db,
-                            idempotency_key=idempotency_key,
+                            db, idempotency_key=idempotency_key,
                         )
                         if fallback_source is None:
-                            raise RuntimeError(
-                                f"source_item insert lost for message_id={message_id}"
-                            )
+                            raise RuntimeError(f"source_item insert lost for message_id={message_id}")
                         skipped += 1
                         source_item_id = str(fallback_source["id"])
                         provider_id = str(fallback_source["provider_id"])
@@ -121,20 +118,16 @@ async def process_gmail_push_notification(
                         provider_id = message_id
 
                 normalization_result = await normalize_gmail_source_item(
-                    db,
-                    source_item_id=source_item_id,
+                    db, source_item_id=source_item_id,
                 )
                 if normalization_result["status"] == "created":
                     normalized += 1
 
                 normalized_item = await _get_normalized_item_by_source_item_id(
-                    db,
-                    source_item_id=source_item_id,
+                    db, source_item_id=source_item_id,
                 )
                 if normalized_item is None:
-                    raise RuntimeError(
-                        f"normalized_item missing for source_item_id={source_item_id}"
-                    )
+                    raise RuntimeError(f"normalized_item missing for source_item_id={source_item_id}")
 
                 emit_result = await publish_normalized_event_once(
                     redis,
@@ -151,42 +144,50 @@ async def process_gmail_push_notification(
                 else:
                     logger.info(
                         "Skipped duplicate process:normalized emission "
-                        "normalized_item_id=%s existing_stream_id=%s",
+                        "normalized_item_id=%s status=%s",
                         normalized_item["id"],
-                        emit_result["stream_id"],
+                        emit_result.get("status", "unknown"),
                     )
 
+                # Collect for post-commit extraction
+                normalized_ids.append((str(normalized_item["id"]), str(account["id"])))
+
             await _update_account_history_id(
-                db,
-                account_id=str(account["id"]),
-                history_id=latest_history_id,
+                db, account_id=str(account["id"]), history_id=latest_history_id,
             )
 
-            logger.info(
-                "Processed Gmail notification email=%s account_id=%s prev_history_id=%s "
-                "new_history_id=%s inserted=%s skipped=%s normalized=%s emitted=%s",
-                email_address,
-                account["id"],
-                previous_history_id,
-                latest_history_id,
-                inserted,
-                skipped,
-                normalized,
-                emitted,
-            )
+        # --- Transaction is now COMMITTED ---
 
-            return {
-                "status": "processed",
-                "account_id": str(account["id"]),
-                "email_address": email_address,
-                "previous_history_id": previous_history_id,
-                "latest_history_id": latest_history_id,
-                "message_ids": message_ids,
-                "inserted": inserted,
-                "skipped": skipped,
-                "normalized": normalized,
-                "emitted": emitted,
-            }
+        logger.info(
+            "Processed Gmail notification email=%s account_id=%s prev_history_id=%s "
+            "new_history_id=%s inserted=%s skipped=%s normalized=%s emitted=%s",
+            email_address, account["id"], previous_history_id, latest_history_id,
+            inserted, skipped, normalized, emitted,
+        )
+
+        # Run inline extraction AFTER commit so data is visible
+        if settings.app_env == "production" and normalized_ids:
+            for nid, aid in normalized_ids:
+                try:
+                    extraction_result = await process_normalized_item_inline(
+                        normalized_item_id=nid, account_id=aid,
+                    )
+                    logger.info("Inline extraction: %s", extraction_result)
+                except Exception:
+                    logger.exception("Inline extraction failed for %s", nid)
+
+        return {
+            "status": "processed",
+            "account_id": str(account["id"]),
+            "email_address": email_address,
+            "previous_history_id": previous_history_id,
+            "latest_history_id": latest_history_id,
+            "message_ids": message_ids,
+            "inserted": inserted,
+            "skipped": skipped,
+            "normalized": normalized,
+            "emitted": emitted,
+        }
 
     except GmailHistoryExpiredError:
         logger.exception(
@@ -194,7 +195,6 @@ async def process_gmail_push_notification(
             email_address,
         )
         raise
-
 
 async def _lock_gmail_account_by_email(
     db: AsyncSession,
@@ -304,23 +304,11 @@ async def _insert_source_item(
     return str(inserted_id) if inserted_id else None
 
 
-async def _update_account_history_id(
-    db: AsyncSession,
-    *,
-    account_id: str,
-    history_id: str,
-) -> None:
+async def _update_account_history_id(db, *, account_id, history_id):
     await db.execute(
-        text(
-            """
-            UPDATE accounts
-            SET history_id = :history_id,
-                last_sync_at = now()
-            WHERE id = :account_id
-            """
-        ),
-        {
-            "account_id": account_id,
-            "history_id": history_id,
-        },
+        text("""
+            UPDATE accounts SET history_id = :hid, last_sync_at = now()
+            WHERE id = :aid
+        """),
+        {"hid": str(history_id), "aid": account_id},
     )
