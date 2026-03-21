@@ -11,7 +11,7 @@ Handles:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text

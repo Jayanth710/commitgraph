@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
 
 from app.services.llm import llm_completion
 from app.services.schemas import ExtractionResponse

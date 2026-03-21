@@ -9,7 +9,7 @@ Usage in routes:
 
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from app.db.session import AsyncSessionLocal
 from app.services.auth import decode_access_token, get_user_by_id

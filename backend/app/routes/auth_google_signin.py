@@ -16,7 +16,7 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.core.config import get_settings

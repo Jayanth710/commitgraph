@@ -9,12 +9,11 @@ Google Calendar alongside their other events.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decrypt_token
 
@@ -34,7 +33,7 @@ async def create_commitment_event(
     commitment_id: str | None = None,
 ) -> dict[str, Any] | None:
     from app.db.session import AsyncSessionLocal
-    from app.core.security import decrypt_token, encrypt_token
+    from app.core.security import encrypt_token
     from app.core.config import get_settings
 
     settings = get_settings()
