@@ -139,13 +139,13 @@ function CommitmentsContent() {
       if (tab !== "all") params.set("direction", tab);
       if (statusFilter) params.set("status", statusFilter);
       if (searchQuery) params.set("q", searchQuery);
+      if (activeAccountId) params.set("account_id", activeAccountId);
       params.set("limit", "100");
 
       const data = searchQuery
         ? await api.searchCommitments(params.toString())
         : await api.getCommitments(params.toString());
       setCommitments(data.commitments);
-      if (activeAccountId) params.set("account_id", activeAccountId);
     } catch (err) {
       console.error(err);
     } finally {
