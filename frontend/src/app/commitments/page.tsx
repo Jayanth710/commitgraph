@@ -459,6 +459,14 @@ function CommitmentCard({
   const [loadingEvidence, setLoadingEvidence] = useState(false);
   const [calendarCreated, setCalendarCreated] = useState(!!c.calendar_event_id);
   const [creatingEvent, setCreatingEvent] = useState(false);
+  const [removingEvent, setRemovingEvent] = useState(false);
+
+  const canAddToCalendar =
+    !!c.due_date &&
+    !calendarCreated &&
+    ["confirmed", "in_progress"].includes(c.status) &&
+    (c.confidence_score ?? 0) >= 0.8;
+
   const toggleEmail = async () => {
     if (showEmail) {
       setShowEmail(false);
@@ -575,7 +583,7 @@ return (
             </>
           )}
 
-          {c.due_date && !calendarCreated && (
+                    {canAddToCalendar && (
             <button
               onClick={async () => {
                 setCreatingEvent(true);
@@ -599,11 +607,30 @@ return (
               {creatingEvent ? "Creating..." : "Add to Calendar"}
             </button>
           )}
+
           {calendarCreated && (
-            <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 text-green-600 dark:text-green-400">
+            <button
+              onClick={async () => {
+                setRemovingEvent(true);
+                try {
+                  await api.deleteCalendarEvent(c.id);
+                  setCalendarCreated(false);
+                  toast.success("Calendar event removed");
+                  window.dispatchEvent(new Event("commitgraph:refresh"));
+                } catch (err: any) {
+                  toast.error(
+                    err.response?.data?.detail || "Failed to remove event",
+                  );
+                } finally {
+                  setRemovingEvent(false);
+                }
+              }}
+              disabled={removingEvent}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-red-50 text-red-700 dark:bg-red-900 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800 transition-colors disabled:opacity-50"
+            >
               <CalendarCheck size={12} />
-              In Calendar
-            </span>
+              {removingEvent ? "Removing..." : "Remove from Calendar"}
+            </button>
           )}
 
           <button

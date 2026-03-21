@@ -58,4 +58,6 @@ export const api = {
   startGmailWatch: (email: string) => client.post(`/gmail/watch/start?email_address=${email}`).then((r) => r.data),
   createCalendarEvent: (commitmentId: string) =>
     client.post(`/api/commitments/${commitmentId}/calendar-event`).then((r) => r.data),
+  deleteCalendarEvent: (commitmentId: string) =>
+    client.delete(`/api/commitments/${commitmentId}/calendar-event`).then((r) => r.data),
 };
