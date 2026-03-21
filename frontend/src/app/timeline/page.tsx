@@ -1,7 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import Sidebar from "@/components/Sidebar";
-import TopBar from "@/components/TopBar";
 import { api } from "@/lib/api";
 import { Mail, Calendar, Inbox } from "lucide-react";
 import { PageSkeleton } from "@/components/Skeleton";

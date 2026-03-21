@@ -3,10 +3,8 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   getToken,
-  getUser,
   setAuth,
   clearAuth,
-  isAuthenticated,
 } from "@/lib/auth";
 import { api } from "@/lib/api";
 
@@ -62,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
     checkAuth();
-  }, [pathname]);
+  }, [pathname, router]);
 
   const login = (token: string, userData: any) => {
     setAuth(token, userData);

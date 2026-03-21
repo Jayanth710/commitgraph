@@ -149,7 +149,7 @@ function CommitmentsContent() {
 
   useEffect(() => {
     fetchCommitments();
-  }, [tab, statusFilter, searchQuery]);
+  }, [fetchCommitments, tab, statusFilter, searchQuery]);
 
   const handleStatusChange = useCallback(
     async (id: string, newStatus: string) => {
