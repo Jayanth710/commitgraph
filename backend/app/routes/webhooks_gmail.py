@@ -60,7 +60,7 @@ async def gmail_webhook(request: Request):
             logger.info("Webhook inline processing complete: %s", result)
             return {"status": "processed", "result": str(result)}
 
-        except Exception as exc:
+        except Exception:
             logger.exception("Inline processing failed, falling back to queue")
             # Fall through to queue below.
 

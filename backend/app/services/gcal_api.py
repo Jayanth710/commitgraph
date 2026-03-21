@@ -16,10 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import decrypt_token
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,6 @@ from app.services.inline_processor import process_normalized_item_inline
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import AsyncSessionLocal
 from app.core.config import get_settings
 
 from app.services.gmail_api import (

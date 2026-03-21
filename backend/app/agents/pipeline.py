@@ -42,7 +42,6 @@ from app.services.commitment_store import (
     insert_review_queue_item,
 )
 from app.services.entity_resolution import resolve_person
-from app.services.schemas import ExtractedCommitment
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

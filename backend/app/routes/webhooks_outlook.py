@@ -56,7 +56,7 @@ async def outlook_webhook(
         for notification in notifications:
             resource = notification.get("resource", "")
             change_type = notification.get("changeType", "")
-            client_state = notification.get("clientState", "")
+            # client_state = notification.get("clientState", "")
 
             # Extract the message ID from the resource path.
             # Resource looks like: "me/messages/{message_id}"

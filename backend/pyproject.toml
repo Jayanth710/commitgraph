@@ -20,6 +20,7 @@ dependencies = [
     "upstash-redis>=1.7.0",
     "PyJWT>=2.8.0",
     "passlib[bcrypt]>=1.7.4",
+    "ruff>=0.15.7",
 ]
 
 [tool.setuptools.packages.find]

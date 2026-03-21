@@ -11,7 +11,6 @@ import logging
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.pipeline import extraction_graph
 from app.core.config import get_settings

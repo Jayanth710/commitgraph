@@ -2,14 +2,13 @@ import secrets
 import logging
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import RedirectResponse
 
 from sqlalchemy import text
 
 from app.db.session import AsyncSessionLocal
 from app.services.google_oauth import (
-    build_google_auth_url,
     exchange_code_for_tokens,
     fetch_gmail_profile,
     upsert_gmail_account,
@@ -26,7 +25,8 @@ router = APIRouter(prefix="/auth/google", tags=["google-auth"])
 
 @router.get("/start")
 async def google_auth_start(request: Request):
-    import json, base64
+    import json
+    import base64
 
     state_token = secrets.token_urlsafe(32)
     
@@ -58,7 +58,8 @@ async def google_auth_callback(
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ):
-    import json, base64
+    import json
+    import base64
 
     if error:
         return RedirectResponse(url=f"{settings.frontend_url}/settings?error={error}", status_code=302)
