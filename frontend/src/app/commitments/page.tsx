@@ -561,6 +561,14 @@ function CommitmentCard({
               ? `You → ${c.target_email || "general"}`
               : `${c.owner_email} → You`}
           </p>
+          {c.account_email && (
+            <div className="mt-2">
+              <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                {c.account_email}
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-gray-400 dark:text-gray-500">
             {c.due_date && (
               <span>Due: {new Date(c.due_date).toLocaleDateString()}</span>
