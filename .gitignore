@@ -1,15 +1,28 @@
+## OS / editor
+.DS_Store
+
+## Environment files
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+## Python
 *.egg-info/
 .venv/
 __pycache__/
-
-# env files
-.env
-
-# macOS
-.DS_Store
-
-# python
-__pycache__/
 *.pyc
-.vercel
-.env*.local
+
+## Frontend build output / dependencies
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/next-env.d.ts
+
+## Deployment tool state
+.vercel/
+frontend/.vercel/
