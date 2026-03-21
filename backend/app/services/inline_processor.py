@@ -83,14 +83,21 @@ async def process_normalized_item_inline(
         graph_result = await extraction_graph.ainvoke(initial_state)
         commitments_stored = len(graph_result.get("stored_commitment_ids", []))
         review_items = graph_result.get("review_items_created", 0)
+        from app.services.job_application_processor import process_job_application_item
+
+        job_result = await process_job_application_item(
+            normalized_item_id=normalized_item_id,
+            account_id=account_id,
+        )
 
         review_count = len(review_items) if isinstance(review_items, list) else review_items
 
         logger.info(
-            "Inline extraction for %s: %d commitments, %d review items",
+            "Inline extraction for %s: %d commitments, %d review items, %d job application updates",
             normalized_item_id, 
             commitments_stored, 
             review_count, 
+            job_result.get("applications_detected", 0),
         )
 
         async with AsyncSessionLocal() as db:
@@ -135,7 +142,12 @@ async def process_normalized_item_inline(
         # except Exception:
         #     logger.exception("Calendar event creation failed")
 
-        return {"status": "processed", "commitments_stored": commitments_stored, "review_items": review_items}
+        return {
+            "status": "processed",
+            "commitments_stored": commitments_stored,
+            "review_items": review_items,
+            "job_applications": job_result.get("applications_detected", 0),
+        }
 
     except Exception as exc:
         logger.exception("Extraction failed for %s", normalized_item_id)
