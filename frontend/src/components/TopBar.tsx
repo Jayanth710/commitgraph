@@ -31,10 +31,10 @@ export default function TopBar() {
           Commit<span className="text-blue-600 dark:text-blue-400">Graph</span>
         </h1>
 
-        <div className="hidden md:flex items-center gap-2 ml-2">
+        <div className="flex items-center gap-2 ml-2 overflow-x-auto max-w-[55vw] md:max-w-none pr-1">
           <button
             onClick={() => setActiveAccountId(null)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+            className={`px-4 py-2 h-10 rounded-full text-sm font-medium border transition-colors shrink-0 ${
               activeAccountId === null
                 ? "bg-blue-600 text-white border-blue-600"
                 : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -44,21 +44,34 @@ export default function TopBar() {
           </button>
 
           {accounts.map((account) => {
-            const label = (account.email_address || "?")[0].toUpperCase();
+            const initial = (account.email_address || "?")[0].toUpperCase();
             const active = activeAccountId === account.id;
+            const shortLabel = (account.email_address || "")
+              .replace("@gmail.com", "")
+              .replace("@outlook.com", "")
+              .slice(0, 14);
 
             return (
               <button
                 key={account.id}
                 onClick={() => setActiveAccountId(account.id)}
                 title={account.email_address}
-                className={`w-8 h-8 rounded-full text-xs font-semibold border transition-colors flex items-center justify-center ${
+                className={`flex items-center gap-2 pl-2 pr-3 h-10 rounded-full text-sm font-medium border transition-colors shrink-0 ${
                   active
-                    ? "bg-blue-600 text-white border-blue-600"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
                     : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700"
                 }`}
               >
-                {label}
+                <span
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
+                    active
+                      ? "bg-white/20 text-white"
+                      : "bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200"
+                  }`}
+                >
+                  {initial}
+                </span>
+                <span className="max-w-[110px] truncate">{shortLabel}</span>
               </button>
             );
           })}
@@ -71,7 +84,9 @@ export default function TopBar() {
           className="flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-lg text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
         >
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-          <span className="hidden md:inline">{theme === "dark" ? "Light" : "Dark"}</span>
+          <span className="hidden md:inline">
+            {theme === "dark" ? "Light" : "Dark"}
+          </span>
         </button>
         {user && (
           <>
