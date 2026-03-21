@@ -1,7 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import Sidebar from "@/components/Sidebar";
-import TopBar from "@/components/TopBar";
 import { api } from "@/lib/api";
 import { PageSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
@@ -44,7 +42,7 @@ export default function ReviewPage() {
         <main className="flex-1 p-8">
           <h2 className="text-2xl font-bold mb-6">Review Queue</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-            Low-confidence detections that need your review. Confirm if it's a real commitment, reject if it's not.
+            Low-confidence detections that need your review. Confirm if it&apos;s a real commitment, reject if it&apos;s not.
           </p>
 
           {loading ? (

@@ -6,7 +6,6 @@ import { clearAuth } from "@/lib/auth";
 import { ListSkeleton } from "@/components/Skeleton";
 import { Unlink, LogOut, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "react-toastify";
-import axios from "axios";
 import PageTransition from "@/components/PageTransition";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
