@@ -15,7 +15,7 @@ import {
   CalendarPlus,
   CalendarCheck,
   Pencil,
-  MoreHorizontal
+  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { useDebouncedCallback } from "use-debounce";
@@ -402,7 +402,7 @@ function CommitmentsContent() {
         </div>
 
         {/* Commitment list */}
-        <div className="space-y-3">
+        <div className="space-y-3 overflow-visible">
           {loading ? (
             <ListSkeleton count={4} />
           ) : commitments.length === 0 ? (
@@ -484,6 +484,9 @@ function CommitmentCard({
   const [evidence, setEvidence] = useState<any[] | null>(null);
   const [loadingEvidence, setLoadingEvidence] = useState(false);
   const [calendarCreated, setCalendarCreated] = useState(!!c.calendar_event_id);
+  const [calendarLink, setCalendarLink] = useState<string | null>(
+    c.calendar_event_link || null,
+  );
   const [creatingEvent, setCreatingEvent] = useState(false);
   const [removingEvent, setRemovingEvent] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -494,7 +497,7 @@ function CommitmentCard({
     ["confirmed", "in_progress"].includes(c.status) &&
     (c.confidence_score ?? 0) >= 0.8;
 
-   const toggleEmail = async () => {
+  const toggleEmail = async () => {
     setShowMenu(false);
 
     if (showEmail) {
@@ -515,7 +518,6 @@ function CommitmentCard({
     }
     setShowEmail(true);
   };
-
 
   const statusColors: Record<string, string> = {
     confirmed:
@@ -543,7 +545,7 @@ function CommitmentCard({
 
   return (
     <div
-      className={`bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 border-l-4 ${urgency} p-4 transition-opacity ${isTerminal ? "opacity-60" : ""}`}
+      className={`relative overflow-visible bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 border-l-4 ${urgency} p-4 transition-opacity ${isTerminal ? "opacity-60" : ""}`}
     >
       {/* Top section */}
       <div className="flex items-start justify-between gap-2">
@@ -600,10 +602,10 @@ function CommitmentCard({
               <button
                 onClick={async () => {
                   setCreatingEvent(true);
-                  setShowMenu(false);
                   try {
-                    await api.createCalendarEvent(c.id);
+                    const result = await api.createCalendarEvent(c.id);
                     setCalendarCreated(true);
+                    setCalendarLink(result.event_link || null);
                     toast.success("Calendar event created!");
                     window.dispatchEvent(new Event("commitgraph:refresh"));
                   } catch (err: any) {
@@ -622,14 +624,26 @@ function CommitmentCard({
               </button>
             )}
 
+            {calendarCreated && calendarLink && (
+              <a
+                href={calendarLink}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800 transition-colors"
+              >
+                <CalendarCheck size={12} />
+                Open Calendar
+              </a>
+            )}
+
             {calendarCreated && (
               <button
                 onClick={async () => {
                   setRemovingEvent(true);
-                  setShowMenu(false);
                   try {
                     await api.deleteCalendarEvent(c.id);
                     setCalendarCreated(false);
+                    setCalendarLink(null);
                     toast.success("Calendar event removed");
                     window.dispatchEvent(new Event("commitgraph:refresh"));
                   } catch (err: any) {
@@ -681,7 +695,7 @@ function CommitmentCard({
               </button>
 
               {showMenu && (
-                <div className="absolute right-0 top-full mt-2 w-44 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-20 py-1">
+                <div className="absolute right-0 bottom-full mb-2 w-44 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl z-50 py-1">
                   <button
                     onClick={() => {
                       setShowMenu(false);

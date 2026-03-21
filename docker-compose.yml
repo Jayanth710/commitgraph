@@ -14,6 +14,9 @@ services:
       - commitgraph_postgres_data:/var/lib/postgresql/data
       - ./backend/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
       - ./backend/migrations/002_users.sql:/docker-entrypoint-initdb.d/002_users.sql:ro
+      - ./backend/migrations/003_priority.sql:/docker-entrypoint-initdb.d/003_priority.sql:ro
+      - ./backend/migrations/004_calendar_event_id.sql:/docker-entrypoint-initdb.d/004_calendar_event_id.sql:ro
+      - ./backend/migrations/005_calendar_event_link.sql:/docker-entrypoint-initdb.d/005_calendar_event_link.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U commitgraph -d commitgraph"]
       interval: 5s
