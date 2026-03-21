@@ -14,6 +14,7 @@ import {
   CheckCircle,
   CalendarPlus,
   CalendarCheck,
+  Pencil,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { useDebouncedCallback } from "use-debounce";
@@ -126,6 +127,7 @@ function CommitmentsContent() {
   const [commitments, setCommitments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const [editingCommitment, setEditingCommitment] = useState<any | null>(null);
 
   const fetchCommitments = useDebouncedCallback(async () => {
     setLoading(true);
@@ -223,6 +225,18 @@ function CommitmentsContent() {
       setUndoAction(null);
     }
   }, [undoAction]);
+
+  const handleSaveEdit = useCallback(async (id: string, body: any) => {
+    const result = await api.updateCommitment(id, body);
+    const updated = result.commitment;
+
+    setCommitments((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...updated } : c)),
+    );
+
+    setEditingCommitment(null);
+    window.dispatchEvent(new Event("commitgraph:refresh"));
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -415,6 +429,7 @@ function CommitmentsContent() {
                     <CommitmentCard
                       commitment={c}
                       onStatusChange={handleStatusChange}
+                      onEdit={() => setEditingCommitment(c)}
                     />
                   </SortableCommitment>
                 ))}
@@ -429,6 +444,14 @@ function CommitmentsContent() {
             action={undoAction}
             onUndo={handleUndo}
             onDismiss={dismissUndo}
+          />
+        )}
+
+        {editingCommitment && (
+          <EditCommitmentModal
+            commitment={editingCommitment}
+            onClose={() => setEditingCommitment(null)}
+            onSave={handleSaveEdit}
           />
         )}
       </>
@@ -450,9 +473,11 @@ export default function CommitmentsPage() {
 function CommitmentCard({
   commitment: c,
   onStatusChange,
+  onEdit,
 }: {
   commitment: any;
   onStatusChange: (id: string, status: string) => void;
+  onEdit: () => void;
 }) {
   const [showEmail, setShowEmail] = useState(false);
   const [evidence, setEvidence] = useState<any[] | null>(null);
@@ -511,7 +536,7 @@ function CommitmentCard({
 
   const isTerminal = c.status === "completed" || c.status === "abandoned";
 
-return (
+  return (
     <div
       className={`bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 border-l-4 ${urgency} p-4 transition-opacity ${isTerminal ? "opacity-60" : ""}`}
     >
@@ -580,10 +605,18 @@ return (
               >
                 Abandon
               </button>
+
+              <button
+                onClick={onEdit}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-50 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-md hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
             </>
           )}
 
-                    {canAddToCalendar && (
+          {canAddToCalendar && (
             <button
               onClick={async () => {
                 setCreatingEvent(true);
@@ -668,6 +701,113 @@ return (
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function EditCommitmentModal({
+  commitment,
+  onClose,
+  onSave,
+}: {
+  commitment: any;
+  onClose: () => void;
+  onSave: (id: string, body: any) => Promise<void>;
+}) {
+  const [summary, setSummary] = useState(commitment.summary || "");
+  const [dueDate, setDueDate] = useState(
+    commitment.due_date
+      ? new Date(commitment.due_date).toISOString().slice(0, 10)
+      : "",
+  );
+  const [status, setStatus] = useState(commitment.status || "confirmed");
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-lg rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-xl">
+        <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+          <h3 className="text-lg font-semibold">Edit Commitment</h3>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Summary</label>
+            <input
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
+              placeholder="Commitment summary"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Due Date</label>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
+            />
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+              Leave blank to remove the due date.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
+            >
+              <option value="confirmed">confirmed</option>
+              <option value="in_progress">in progress</option>
+              <option value="completed">completed</option>
+              <option value="abandoned">abandoned</option>
+              <option value="delegated">delegated</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-800">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await onSave(commitment.id, {
+                  summary,
+                  due_date: dueDate || null,
+                  status,
+                });
+                toast.success("Commitment updated");
+              } catch (err: any) {
+                toast.error(
+                  err.response?.data?.detail || "Failed to update commitment",
+                );
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={saving}
+            className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

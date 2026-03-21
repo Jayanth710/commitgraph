@@ -192,25 +192,31 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
 
 
 @router.patch("/commitments/{commitment_id}")
-async def update_commitment_status(
+async def update_commitment(
     commitment_id: str,
     body: dict,
     user: dict = Depends(get_current_user),
 ):
     user_id = str(user["id"])
-    new_status = body.get("status")
-    valid_statuses = {"confirmed", "in_progress", "completed", "abandoned", "delegated"}
 
-    if new_status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+    allowed_fields = {"status", "summary", "due_date"}
+    updates = {k: v for k, v in body.items() if k in allowed_fields}
+
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid fields provided. Allowed: status, summary, due_date",
+        )
+
+    valid_statuses = {"confirmed", "in_progress", "completed", "abandoned", "delegated"}
 
     async with AsyncSessionLocal() as db:
         async with db.begin():
-            # Verify ownership.
             ownership = await db.execute(
                 text(
                     """
-                    SELECT c.status FROM commitments c
+                    SELECT c.status, c.summary, c.due_date
+                    FROM commitments c
                     JOIN evidence_links el ON el.commitment_id = c.id
                     JOIN normalized_items ni ON ni.id = el.normalized_item_id
                     JOIN accounts a ON a.id = ni.account_id
@@ -220,26 +226,85 @@ async def update_commitment_status(
                 ),
                 {"cid": commitment_id, "user_id": user_id},
             )
-            row = ownership.scalar_one_or_none()
-            if row is None:
+            current = ownership.mappings().first()
+            if current is None:
                 raise HTTPException(status_code=404, detail="Commitment not found")
 
-            terminal = {"completed", "abandoned"}
-            if row in terminal and new_status not in {"confirmed", "in_progress"}:
-                raise HTTPException(status_code=400, detail=f"Can only revert '{row}' to 'confirmed' or 'in_progress'")
+            set_clauses: list[str] = ["updated_at = now()"]
+            params: dict[str, object] = {"cid": commitment_id}
 
-            update_fields = "status = :new_status, status_changed_at = now(), updated_at = now()"
-            if new_status == "completed":
-                update_fields += ", completed_at = now()"
-            elif new_status in ("confirmed", "in_progress") and row in ("completed", "abandoned"):
-                update_fields += ", completed_at = NULL"
+            if "summary" in updates:
+                summary = (updates["summary"] or "").strip()
+                if not summary:
+                    raise HTTPException(status_code=400, detail="Summary cannot be empty")
+                if len(summary) > 500:
+                    raise HTTPException(status_code=400, detail="Summary is too long")
+                set_clauses.append("summary = :summary")
+                params["summary"] = summary
+
+            if "due_date" in updates:
+                due_date = updates["due_date"]
+                if due_date in ("", None):
+                    set_clauses.append("due_date = NULL")
+                else:
+                    set_clauses.append("due_date = :due_date")
+                    params["due_date"] = due_date
+
+            if "status" in updates:
+                new_status = updates["status"]
+                if new_status not in valid_statuses:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid status. Must be one of: {valid_statuses}",
+                    )
+
+                current_status = current["status"]
+                terminal = {"completed", "abandoned"}
+                if current_status in terminal and new_status not in {"confirmed", "in_progress"}:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Can only revert '{current_status}' to 'confirmed' or 'in_progress'",
+                    )
+
+                set_clauses.append("status = :new_status")
+                set_clauses.append("status_changed_at = now()")
+                params["new_status"] = new_status
+
+                if new_status == "completed":
+                    set_clauses.append("completed_at = now()")
+                elif new_status in {"confirmed", "in_progress"} and current_status in terminal:
+                    set_clauses.append("completed_at = NULL")
 
             await db.execute(
-                text(f"UPDATE commitments SET {update_fields} WHERE id = :cid"),
-                {"cid": commitment_id, "new_status": new_status},
+                text(f"UPDATE commitments SET {', '.join(set_clauses)} WHERE id = :cid"),
+                params,
             )
 
-    return {"commitment_id": commitment_id, "status": new_status}
+            refreshed = await db.execute(
+                text(
+                    """
+                    SELECT
+                        c.id, c.summary, c.raw_text, c.direction, c.status,
+                        c.commitment_type, c.confidence_score,
+                        c.due_date, c.due_date_confidence,
+                        c.created_at, c.updated_at, c.completed_at, c.detected_at, c.calendar_event_id,
+                        p_owner.display_name as owner_name,
+                        p_owner.email_addresses[1] as owner_email,
+                        p_owner.is_self as owner_is_self,
+                        p_target.display_name as target_name,
+                        p_target.email_addresses[1] as target_email
+                    FROM commitments c
+                    JOIN persons p_owner ON p_owner.id = c.owner_person_id
+                    LEFT JOIN persons p_target ON p_target.id = c.target_person_id
+                    WHERE c.id = :cid
+                    LIMIT 1
+                    """
+                ),
+                {"cid": commitment_id},
+            )
+            row = refreshed.mappings().first()
+
+    return {"commitment": _serialize_row(row)}
 
 @router.get("/commitments/search")
 async def search_commitments(
