@@ -53,7 +53,15 @@ async def list_commitments(
                     c.commitment_type, c.confidence_score,
                     c.due_date, c.created_at, c.updated_at,
                     c.completed_at, c.detected_at, c.calendar_event_id, c.calendar_event_link,
-                    a.email_address as account_email,
+                    (
+                        SELECT a2.email_address
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        JOIN accounts a2 ON a2.id = ni2.account_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY el2.linked_at ASC
+                        LIMIT 1
+                    ) as account_email,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,
@@ -151,7 +159,15 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
                     c.commitment_type, c.confidence_score,
                     c.due_date, c.due_date_confidence,
                     c.created_at, c.updated_at, c.completed_at, c.detected_at, c.calendar_event_id, c.calendar_event_link,
-                    a.email_address as account_email,
+                    (
+                        SELECT a2.email_address
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        JOIN accounts a2 ON a2.id = ni2.account_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY el2.linked_at ASC
+                        LIMIT 1
+                    ) as account_email,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,
@@ -438,7 +454,15 @@ async def search_commitments(
                     c.id, c.summary, c.direction, c.status,
                     c.commitment_type, c.confidence_score,
                     c.due_date, c.created_at,
-                    a.email_address as account_email,
+                    (
+                        SELECT a2.email_address
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        JOIN accounts a2 ON a2.id = ni2.account_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY el2.linked_at ASC
+                        LIMIT 1
+                    ) as account_email,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,
