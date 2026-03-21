@@ -47,7 +47,7 @@ async def list_commitments(
                     c.id, c.summary, c.direction, c.status,
                     c.commitment_type, c.confidence_score,
                     c.due_date, c.created_at, c.updated_at,
-                    c.completed_at, c.detected_at, c.calendar_event_id,
+                    c.completed_at, c.detected_at, c.calendar_event_id, c.calendar_event_link,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,
@@ -144,7 +144,7 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
                     c.id, c.summary, c.raw_text, c.direction, c.status,
                     c.commitment_type, c.confidence_score,
                     c.due_date, c.due_date_confidence,
-                    c.created_at, c.updated_at, c.completed_at, c.detected_at, c.calendar_event_id,
+                    c.created_at, c.updated_at, c.completed_at, c.detected_at, c.calendar_event_id, c.calendar_event_link,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,
@@ -876,138 +876,28 @@ async def get_chart_data(user: dict = Depends(get_current_user)):
 
 @router.get("/digest/weekly")
 async def weekly_digest(user: dict = Depends(get_current_user)):
-    """Generate a weekly summary of commitment activity."""
+    from app.services.dashboard_queries import get_weekly_digest_data
+
     user_id = str(user["id"])
-
     async with AsyncSessionLocal() as db:
-        # This week's stats.
-        result = await db.execute(
-            text(
-                """
-                SELECT
-                    count(DISTINCT c.id) FILTER (WHERE c.detected_at >= now() - interval '7 days') as new_this_week,
-                    count(DISTINCT c.id) FILTER (WHERE c.completed_at >= now() - interval '7 days') as completed_this_week,
-                    count(DISTINCT c.id) FILTER (WHERE c.status = 'overdue') as currently_overdue,
-                    count(DISTINCT c.id) FILTER (WHERE c.due_date >= now() AND c.due_date < now() + interval '7 days' AND c.status NOT IN ('completed', 'abandoned')) as due_this_week,
-                    count(DISTINCT c.id) FILTER (WHERE c.status NOT IN ('completed', 'abandoned')) as total_open
-                FROM commitments c
-                JOIN evidence_links el ON el.commitment_id = c.id
-                JOIN normalized_items ni ON ni.id = el.normalized_item_id
-                JOIN accounts a ON a.id = ni.account_id
-                WHERE a.user_id = :user_id
-                """
-            ),
-            {"user_id": user_id},
-        )
-        stats = result.mappings().first()
-
-        # Commitments due this week.
-        due_result = await db.execute(
-            text(
-                """
-                SELECT DISTINCT ON (c.id)
-                    c.id, c.summary, c.direction, c.status, c.due_date, c.confidence_score,
-                    p_owner.email_addresses[1] as owner_email,
-                    p_owner.is_self as owner_is_self,
-                    p_target.email_addresses[1] as target_email
-                FROM commitments c
-                JOIN persons p_owner ON p_owner.id = c.owner_person_id
-                LEFT JOIN persons p_target ON p_target.id = c.target_person_id
-                JOIN evidence_links el ON el.commitment_id = c.id
-                JOIN normalized_items ni ON ni.id = el.normalized_item_id
-                JOIN accounts a ON a.id = ni.account_id
-                WHERE a.user_id = :user_id
-                  AND c.due_date >= now()
-                  AND c.due_date < now() + interval '7 days'
-                  AND c.status NOT IN ('completed', 'abandoned')
-                ORDER BY c.id, c.due_date ASC
-                """
-            ),
-            {"user_id": user_id},
-        )
-        due_this_week = due_result.mappings().all()
-
-        # Recently completed.
-        completed_result = await db.execute(
-            text(
-                """
-                SELECT DISTINCT ON (c.id)
-                    c.id, c.summary, c.direction, c.completed_at,
-                    p_target.email_addresses[1] as target_email
-                FROM commitments c
-                LEFT JOIN persons p_target ON p_target.id = c.target_person_id
-                JOIN evidence_links el ON el.commitment_id = c.id
-                JOIN normalized_items ni ON ni.id = el.normalized_item_id
-                JOIN accounts a ON a.id = ni.account_id
-                WHERE a.user_id = :user_id
-                  AND c.completed_at >= now() - interval '7 days'
-                ORDER BY c.id, c.completed_at DESC
-                """
-            ),
-            {"user_id": user_id},
-        )
-        recently_completed = completed_result.mappings().all()
-
-        # Overdue items.
-        overdue_result = await db.execute(
-            text(
-                """
-                SELECT DISTINCT ON (c.id)
-                    c.id, c.summary, c.direction, c.due_date, c.status,
-                    p_target.email_addresses[1] as target_email
-                FROM commitments c
-                LEFT JOIN persons p_target ON p_target.id = c.target_person_id
-                JOIN evidence_links el ON el.commitment_id = c.id
-                JOIN normalized_items ni ON ni.id = el.normalized_item_id
-                JOIN accounts a ON a.id = ni.account_id
-                WHERE a.user_id = :user_id
-                  AND c.status = 'overdue'
-                ORDER BY c.id, c.due_date ASC
-                """
-            ),
-            {"user_id": user_id},
-        )
-        overdue_items = overdue_result.mappings().all()
-
-    return {
-        "stats": _serialize_row(stats),
-        "due_this_week": [_serialize_row(r) for r in due_this_week],
-        "recently_completed": [_serialize_row(r) for r in recently_completed],
-        "overdue": [_serialize_row(r) for r in overdue_items],
-    }
+        return await get_weekly_digest_data(db, user_id=user_id)
 
 @router.post("/commitments/{commitment_id}/calendar-event")
 async def create_calendar_event_for_commitment(
     commitment_id: str,
     user: dict = Depends(get_current_user),
 ):
-    """Create a Google Calendar event for a specific commitment."""
     from app.services.gcal_create import create_commitment_event
+    from app.services.dashboard_queries import get_commitment_calendar_create_payload
 
     user_id = str(user["id"])
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            text(
-                """
-                SELECT c.id, c.summary, c.due_date, c.direction,
-                       c.status, c.confidence_score, c.calendar_event_id,
-                       p_owner.email_addresses[1] as owner_email,
-                       p_target.email_addresses[1] as target_email,
-                       a.id as account_id
-                FROM commitments c
-                JOIN persons p_owner ON p_owner.id = c.owner_person_id
-                LEFT JOIN persons p_target ON p_target.id = c.target_person_id
-                JOIN evidence_links el ON el.commitment_id = c.id
-                JOIN normalized_items ni ON ni.id = el.normalized_item_id
-                JOIN accounts a ON a.id = ni.account_id
-                WHERE c.id = :cid AND a.user_id = :uid
-                LIMIT 1
-                """
-            ),
-            {"cid": commitment_id, "uid": user_id},
+        row = await get_commitment_calendar_create_payload(
+            db,
+            commitment_id=commitment_id,
+            user_id=user_id,
         )
-        row = result.mappings().first()
 
     if not row:
         raise HTTPException(status_code=404, detail="Commitment not found")
@@ -1031,6 +921,7 @@ async def create_calendar_event_for_commitment(
         return {
             "message": "Calendar event already exists",
             "event_id": row["calendar_event_id"],
+            "event_link": row.get("calendar_event_link"),
         }
 
     event = await create_commitment_event(
@@ -1053,12 +944,14 @@ async def create_calendar_event_for_commitment(
                     """
                     UPDATE commitments
                     SET calendar_event_id = :eid,
+                        calendar_event_link = :elink,
                         updated_at = now()
                     WHERE id = :cid
                     """
                 ),
                 {
                     "eid": event.get("id"),
+                    "elink": event.get("htmlLink"),
                     "cid": commitment_id,
                 },
             )
@@ -1066,6 +959,7 @@ async def create_calendar_event_for_commitment(
     return {
         "message": "Calendar event created",
         "event_id": event.get("id"),
+        "event_link": event.get("htmlLink"),
     }
 
 @router.delete("/commitments/{commitment_id}/calendar-event")
@@ -1073,27 +967,17 @@ async def delete_calendar_event_for_commitment(
     commitment_id: str,
     user: dict = Depends(get_current_user),
 ):
-    """Delete a Google Calendar event linked to a commitment."""
     from app.services.gcal_delete import delete_commitment_event
+    from app.services.dashboard_queries import get_commitment_calendar_delete_payload
 
     user_id = str(user["id"])
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            text(
-                """
-                SELECT c.id, c.calendar_event_id, a.id as account_id
-                FROM commitments c
-                JOIN evidence_links el ON el.commitment_id = c.id
-                JOIN normalized_items ni ON ni.id = el.normalized_item_id
-                JOIN accounts a ON a.id = ni.account_id
-                WHERE c.id = :cid AND a.user_id = :uid
-                LIMIT 1
-                """
-            ),
-            {"cid": commitment_id, "uid": user_id},
+        row = await get_commitment_calendar_delete_payload(
+            db,
+            commitment_id=commitment_id,
+            user_id=user_id,
         )
-        row = result.mappings().first()
 
     if not row:
         raise HTTPException(status_code=404, detail="Commitment not found")
@@ -1116,6 +1000,7 @@ async def delete_calendar_event_for_commitment(
                     """
                     UPDATE commitments
                     SET calendar_event_id = NULL,
+                        calendar_event_link = NULL,
                         updated_at = now()
                     WHERE id = :cid
                     """
