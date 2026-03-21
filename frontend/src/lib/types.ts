@@ -29,6 +29,7 @@ export type Commitment = {
   owner_is_self?: boolean;
   target_name?: string | null;
   target_email?: string | null;
+  account_email?: string | null;
 };
 
 export type EvidenceItem = {
