@@ -306,6 +306,86 @@ async def update_commitment(
 
     return {"commitment": _serialize_row(row)}
 
+@router.post("/commitments/{commitment_id}/merge")
+async def merge_commitment(
+    commitment_id: str,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    user_id = str(user["id"])
+    target_commitment_id = body.get("target_commitment_id")
+
+    if not target_commitment_id:
+        raise HTTPException(status_code=400, detail="target_commitment_id is required")
+
+    if target_commitment_id == commitment_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a commitment into itself")
+
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            source_result = await db.execute(
+                text(
+                    """
+                    SELECT c.id
+                    FROM commitments c
+                    JOIN evidence_links el ON el.commitment_id = c.id
+                    JOIN normalized_items ni ON ni.id = el.normalized_item_id
+                    JOIN accounts a ON a.id = ni.account_id
+                    WHERE c.id = :cid AND a.user_id = :uid
+                    LIMIT 1
+                    """
+                ),
+                {"cid": commitment_id, "uid": user_id},
+            )
+            source = source_result.mappings().first()
+            if not source:
+                raise HTTPException(status_code=404, detail="Source commitment not found")
+
+            target_result = await db.execute(
+                text(
+                    """
+                    SELECT c.id
+                    FROM commitments c
+                    JOIN evidence_links el ON el.commitment_id = c.id
+                    JOIN normalized_items ni ON ni.id = el.normalized_item_id
+                    JOIN accounts a ON a.id = ni.account_id
+                    WHERE c.id = :target_id AND a.user_id = :uid
+                    LIMIT 1
+                    """
+                ),
+                {"target_id": target_commitment_id, "uid": user_id},
+            )
+            target = target_result.mappings().first()
+            if not target:
+                raise HTTPException(status_code=404, detail="Target commitment not found")
+
+            await db.execute(
+                text(
+                    """
+                    UPDATE evidence_links
+                    SET commitment_id = :target_id
+                    WHERE commitment_id = :source_id
+                    """
+                ),
+                {"target_id": target_commitment_id, "source_id": commitment_id},
+            )
+
+            await db.execute(
+                text("DELETE FROM review_queue WHERE commitment_id = :source_id"),
+                {"source_id": commitment_id},
+            )
+
+            await db.execute(
+                text("DELETE FROM commitments WHERE id = :source_id"),
+                {"source_id": commitment_id},
+            )
+
+    return {
+        "message": "Commitments merged",
+        "source_commitment_id": commitment_id,
+        "target_commitment_id": target_commitment_id,
+    }
+
 @router.get("/commitments/search")
 async def search_commitments(
     user: dict = Depends(get_current_user),
@@ -399,14 +479,32 @@ async def list_review_queue(user: dict = Depends(get_current_user)):
 @router.patch("/review-queue/{review_id}")
 async def review_action(review_id: str, body: dict, user: dict = Depends(get_current_user)):
     action = body.get("action")
-    if action not in {"confirm", "reject", "dismiss"}:
-        raise HTTPException(status_code=400, detail="Action must be: confirm, reject, dismiss")
+    user_id = str(user["id"])
+
+    if action not in {"confirm", "reject", "dismiss", "edit", "merge"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Action must be: confirm, reject, dismiss, edit, merge",
+        )
 
     async with AsyncSessionLocal() as db:
         async with db.begin():
             rq_result = await db.execute(
-                text("SELECT commitment_id FROM review_queue WHERE id = :rid AND status = 'pending'"),
-                {"rid": review_id},
+                text(
+                    """
+                    SELECT rq.commitment_id
+                    FROM review_queue rq
+                    JOIN commitments c ON c.id = rq.commitment_id
+                    JOIN evidence_links el ON el.commitment_id = c.id
+                    JOIN normalized_items ni ON ni.id = el.normalized_item_id
+                    JOIN accounts a ON a.id = ni.account_id
+                    WHERE rq.id = :rid
+                      AND rq.status = 'pending'
+                      AND a.user_id = :uid
+                    LIMIT 1
+                    """
+                ),
+                {"rid": review_id, "uid": user_id},
             )
             rq_row = rq_result.mappings().first()
             if not rq_row:
@@ -416,27 +514,160 @@ async def review_action(review_id: str, body: dict, user: dict = Depends(get_cur
 
             if action == "confirm":
                 await db.execute(
-                    text("UPDATE commitments SET status = 'confirmed', status_changed_at = now(), updated_at = now() WHERE id = :cid"),
+                    text(
+                        """
+                        UPDATE commitments
+                        SET status = 'confirmed', status_changed_at = now(), updated_at = now()
+                        WHERE id = :cid
+                        """
+                    ),
                     {"cid": commitment_id},
                 )
                 await db.execute(
-                    text("UPDATE review_queue SET status = 'reviewed', reviewed_at = now(), user_decision = 'confirmed' WHERE id = :rid"),
+                    text(
+                        """
+                        UPDATE review_queue
+                        SET status = 'reviewed', reviewed_at = now(), user_decision = 'confirmed'
+                        WHERE id = :rid
+                        """
+                    ),
                     {"rid": review_id},
                 )
+
             elif action == "reject":
                 await db.execute(text("DELETE FROM commitments WHERE id = :cid"), {"cid": commitment_id})
                 await db.execute(
-                    text("UPDATE review_queue SET status = 'dismissed', reviewed_at = now(), user_decision = 'rejected' WHERE id = :rid"),
+                    text(
+                        """
+                        UPDATE review_queue
+                        SET status = 'dismissed', reviewed_at = now(), user_decision = 'rejected'
+                        WHERE id = :rid
+                        """
+                    ),
                     {"rid": review_id},
                 )
-            else:
+
+            elif action == "dismiss":
                 await db.execute(
-                    text("UPDATE review_queue SET status = 'dismissed', reviewed_at = now(), user_decision = 'dismissed' WHERE id = :rid"),
+                    text(
+                        """
+                        UPDATE review_queue
+                        SET status = 'dismissed', reviewed_at = now(), user_decision = 'dismissed'
+                        WHERE id = :rid
+                        """
+                    ),
                     {"rid": review_id},
+                )
+
+            elif action == "edit":
+                summary = (body.get("summary") or "").strip()
+                due_date = body.get("due_date")
+                new_status = body.get("status")
+
+                if not summary:
+                    raise HTTPException(status_code=400, detail="Summary is required for edit")
+
+                valid_statuses = {"detected", "confirmed", "in_progress", "completed", "abandoned", "delegated"}
+                if new_status and new_status not in valid_statuses:
+                    raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+
+                params = {"cid": commitment_id, "summary": summary, "due_date": due_date}
+                set_parts = [
+                    "summary = :summary",
+                    "due_date = :due_date",
+                    "updated_at = now()",
+                ]
+
+                if new_status:
+                    set_parts.append("status = :status")
+                    set_parts.append("status_changed_at = now()")
+                    params["status"] = new_status
+                    if new_status == "completed":
+                        set_parts.append("completed_at = now()")
+                    elif new_status in {"confirmed", "in_progress", "detected", "delegated"}:
+                        set_parts.append("completed_at = NULL")
+
+                await db.execute(
+                    text(f"UPDATE commitments SET {', '.join(set_parts)} WHERE id = :cid"),
+                    params,
+                )
+
+                await db.execute(
+                    text(
+                        """
+                        UPDATE review_queue
+                        SET status = 'reviewed', reviewed_at = now(), user_decision = 'edited'
+                        WHERE id = :rid
+                        """
+                    ),
+                    {"rid": review_id},
+                )
+
+            elif action == "merge":
+                target_commitment_id = body.get("merge_into_commitment_id")
+                if not target_commitment_id:
+                    raise HTTPException(status_code=400, detail="merge_into_commitment_id is required")
+
+                if target_commitment_id == commitment_id:
+                    raise HTTPException(status_code=400, detail="Cannot merge a commitment into itself")
+
+                verify_target = await db.execute(
+                    text(
+                        """
+                        SELECT c.id
+                        FROM commitments c
+                        JOIN evidence_links el ON el.commitment_id = c.id
+                        JOIN normalized_items ni ON ni.id = el.normalized_item_id
+                        JOIN accounts a ON a.id = ni.account_id
+                        WHERE c.id = :target_id AND a.user_id = :uid
+                        LIMIT 1
+                        """
+                    ),
+                    {"target_id": target_commitment_id, "uid": user_id},
+                )
+                target_row = verify_target.mappings().first()
+                if not target_row:
+                    raise HTTPException(status_code=404, detail="Merge target not found")
+
+                await db.execute(
+                    text(
+                        """
+                        UPDATE evidence_links
+                        SET commitment_id = :target_id
+                        WHERE commitment_id = :source_id
+                        """
+                    ),
+                    {"target_id": target_commitment_id, "source_id": commitment_id},
+                )
+
+                await db.execute(
+                    text(
+                        """
+                        UPDATE review_queue
+                        SET status = 'reviewed', reviewed_at = now(), user_decision = 'merged'
+                        WHERE id = :rid
+                        """
+                    ),
+                    {"rid": review_id},
+                )
+
+                await db.execute(
+                    text(
+                        """
+                        DELETE FROM review_queue
+                        WHERE commitment_id = :source_id
+                          AND id <> :rid
+                        """
+                    ),
+                    {"source_id": commitment_id, "rid": review_id},
+                )
+
+                await db.execute(
+                    text("DELETE FROM commitments WHERE id = :source_id"),
+                    {"source_id": commitment_id},
                 )
 
     return {"review_id": review_id, "action": action, "commitment_id": str(commitment_id)}
-
 
 @router.get("/timeline")
 async def list_timeline(

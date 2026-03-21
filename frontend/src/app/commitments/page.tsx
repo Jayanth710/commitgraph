@@ -15,6 +15,7 @@ import {
   CalendarPlus,
   CalendarCheck,
   Pencil,
+  MoreHorizontal
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { useDebouncedCallback } from "use-debounce";
@@ -485,6 +486,7 @@ function CommitmentCard({
   const [calendarCreated, setCalendarCreated] = useState(!!c.calendar_event_id);
   const [creatingEvent, setCreatingEvent] = useState(false);
   const [removingEvent, setRemovingEvent] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   const canAddToCalendar =
     !!c.due_date &&
@@ -492,7 +494,9 @@ function CommitmentCard({
     ["confirmed", "in_progress"].includes(c.status) &&
     (c.confidence_score ?? 0) >= 0.8;
 
-  const toggleEmail = async () => {
+   const toggleEmail = async () => {
+    setShowMenu(false);
+
     if (showEmail) {
       setShowEmail(false);
       return;
@@ -511,6 +515,7 @@ function CommitmentCard({
     }
     setShowEmail(true);
   };
+
 
   const statusColors: Record<string, string> = {
     confirmed:
@@ -572,120 +577,138 @@ function CommitmentCard({
 
       {/* Actions */}
       <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-        <div className="flex flex-wrap gap-2">
-          {isTerminal ? (
-            <button
-              onClick={() => onStatusChange(c.id, "confirmed")}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            >
-              <Undo2 size={12} />
-              Reopen
-            </button>
-          ) : (
-            <>
-              {c.status !== "completed" && (
-                <button
-                  onClick={() => onStatusChange(c.id, "completed")}
-                  className="text-xs px-3 py-1.5 bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-300 rounded-md hover:bg-green-100 dark:hover:bg-green-800 transition-colors"
-                >
-                  Mark Complete
-                </button>
-              )}
-              {c.status === "detected" && (
-                <button
-                  onClick={() => onStatusChange(c.id, "confirmed")}
-                  className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-md hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
-                >
-                  Confirm
-                </button>
-              )}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isTerminal ? (
               <button
-                onClick={() => onStatusChange(c.id, "abandoned")}
-                className="text-xs px-3 py-1.5 bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                onClick={() => onStatusChange(c.id, "confirmed")}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
               >
-                Abandon
+                <Undo2 size={12} />
+                Reopen
               </button>
-
-              <button
-                onClick={onEdit}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-50 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-md hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors"
-              >
-                <Pencil size={12} />
-                Edit
-              </button>
-            </>
-          )}
-
-          {canAddToCalendar && (
-            <button
-              onClick={async () => {
-                setCreatingEvent(true);
-                try {
-                  await api.createCalendarEvent(c.id);
-                  setCalendarCreated(true);
-                  toast.success("Calendar event created!");
-                  window.dispatchEvent(new Event("commitgraph:refresh"));
-                } catch (err: any) {
-                  toast.error(
-                    err.response?.data?.detail || "Failed to create event",
-                  );
-                } finally {
-                  setCreatingEvent(false);
-                }
-              }}
-              disabled={creatingEvent}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-800 transition-colors disabled:opacity-50"
-            >
-              <CalendarPlus size={12} />
-              {creatingEvent ? "Creating..." : "Add to Calendar"}
-            </button>
-          )}
-
-          {calendarCreated && (
-            <button
-              onClick={async () => {
-                setRemovingEvent(true);
-                try {
-                  await api.deleteCalendarEvent(c.id);
-                  setCalendarCreated(false);
-                  toast.success("Calendar event removed");
-                  window.dispatchEvent(new Event("commitgraph:refresh"));
-                } catch (err: any) {
-                  toast.error(
-                    err.response?.data?.detail || "Failed to remove event",
-                  );
-                } finally {
-                  setRemovingEvent(false);
-                }
-              }}
-              disabled={removingEvent}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-red-50 text-red-700 dark:bg-red-900 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800 transition-colors disabled:opacity-50"
-            >
-              <CalendarCheck size={12} />
-              {removingEvent ? "Removing..." : "Remove from Calendar"}
-            </button>
-          )}
-
-          <button
-            onClick={toggleEmail}
-            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-colors ${
-              showEmail
-                ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
-            }`}
-          >
-            {loadingEvidence ? (
-              "Loading..."
-            ) : showEmail ? (
-              <>
-                <EyeOff size={12} /> Hide email
-              </>
             ) : (
-              <>
-                <Eye size={12} /> View email
-              </>
+              <button
+                onClick={() => onStatusChange(c.id, "completed")}
+                className="text-xs px-3 py-1.5 bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-300 rounded-md hover:bg-green-100 dark:hover:bg-green-800 transition-colors"
+              >
+                Mark Complete
+              </button>
             )}
-          </button>
+
+            {canAddToCalendar && (
+              <button
+                onClick={async () => {
+                  setCreatingEvent(true);
+                  setShowMenu(false);
+                  try {
+                    await api.createCalendarEvent(c.id);
+                    setCalendarCreated(true);
+                    toast.success("Calendar event created!");
+                    window.dispatchEvent(new Event("commitgraph:refresh"));
+                  } catch (err: any) {
+                    toast.error(
+                      err.response?.data?.detail || "Failed to create event",
+                    );
+                  } finally {
+                    setCreatingEvent(false);
+                  }
+                }}
+                disabled={creatingEvent}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-800 transition-colors disabled:opacity-50"
+              >
+                <CalendarPlus size={12} />
+                {creatingEvent ? "Creating..." : "Add to Calendar"}
+              </button>
+            )}
+
+            {calendarCreated && (
+              <button
+                onClick={async () => {
+                  setRemovingEvent(true);
+                  setShowMenu(false);
+                  try {
+                    await api.deleteCalendarEvent(c.id);
+                    setCalendarCreated(false);
+                    toast.success("Calendar event removed");
+                    window.dispatchEvent(new Event("commitgraph:refresh"));
+                  } catch (err: any) {
+                    toast.error(
+                      err.response?.data?.detail || "Failed to remove event",
+                    );
+                  } finally {
+                    setRemovingEvent(false);
+                  }
+                }}
+                disabled={removingEvent}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-red-50 text-red-700 dark:bg-red-900 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800 transition-colors disabled:opacity-50"
+              >
+                <CalendarCheck size={12} />
+                {removingEvent ? "Removing..." : "Remove from Calendar"}
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={toggleEmail}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-colors ${
+                showEmail
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+              }`}
+            >
+              {loadingEvidence ? (
+                "Loading..."
+              ) : showEmail ? (
+                <>
+                  <EyeOff size={12} /> Hide email
+                </>
+              ) : (
+                <>
+                  <Eye size={12} /> View email
+                </>
+              )}
+            </button>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowMenu((v) => !v)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
+              >
+                <MoreHorizontal size={12} />
+                More
+              </button>
+
+              {showMenu && (
+                <div className="absolute right-0 top-full mt-2 w-44 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-20 py-1">
+                  <button
+                    onClick={() => {
+                      setShowMenu(false);
+                      onEdit();
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    <Pencil size={14} />
+                    Edit
+                  </button>
+
+                  {!isTerminal && (
+                    <button
+                      onClick={() => {
+                        setShowMenu(false);
+                        onStatusChange(c.id, "abandoned");
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+                    >
+                      <X size={14} />
+                      Abandon
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
