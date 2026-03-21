@@ -5,15 +5,19 @@ import { Mail, Calendar, Inbox } from "lucide-react";
 import { PageSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
 import PageTransition from "@/components/PageTransition";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 
 export default function TimelinePage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const { activeAccountId } = useAccountFilter();
 
   useEffect(() => {
-    async function load() {
+        async function load() {
       try {
-        const data = await api.getTimeline("limit=100");
+        const params = new URLSearchParams({ limit: "100" });
+        if (activeAccountId) params.set("account_id", activeAccountId);
+        const data = await api.getTimeline(params.toString());
         setItems(data.items);
       } catch (err) {
         console.error(err);
@@ -22,7 +26,7 @@ export default function TimelinePage() {
       }
     }
     load();
-  }, []);
+  }, [activeAccountId]);
 
   const providerColors: Record<string, string> = {
     gmail: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",

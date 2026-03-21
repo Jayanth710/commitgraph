@@ -21,6 +21,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
@@ -29,14 +30,25 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [hasAccounts, setHasAccounts] = useState(true);
   const router = useRouter();
+  const { activeAccountId } = useAccountFilter();
+
 
   useEffect(() => {
     async function load() {
       try {
+        const params = new URLSearchParams();
+        if (activeAccountId) params.set("account_id", activeAccountId);
+
         const [statsData, commitmentsData] = await Promise.all([
-          api.getStats(),
-          api.getCommitments("limit=10"),
+          api.getStats(params.toString()),
+          api.getCommitments(
+            new URLSearchParams({
+              ...(activeAccountId ? { account_id: activeAccountId } : {}),
+              limit: "10",
+            }).toString(),
+          ),
         ]);
+
         setStats(statsData);
         setCommitments(commitmentsData.commitments);
 
@@ -48,7 +60,7 @@ export default function DashboardPage() {
         }
 
         try {
-          const chartResponse = await api.getChartData();
+          const chartResponse = await api.getChartData(params.toString());
           setChartData(chartResponse.chart_data || []);
         } catch {
           setChartData([]);
@@ -59,8 +71,9 @@ export default function DashboardPage() {
         setLoading(false);
       }
     }
+
     load();
-  }, []);
+  }, [activeAccountId]);
 
   if (loading) return <PageSkeleton />;
 
