@@ -11,3 +11,5 @@ __pycache__/
 # python
 __pycache__/
 *.pyc
+.vercel
+.env*.local
