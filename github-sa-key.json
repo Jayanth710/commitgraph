@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "commitgraph",
+  "private_key_id": "94aab73299323418f553b123e9e145fd8c571cda",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDbxeELB4aPZZTQ\nizBelfs8g5ZyYq3eUnsqp5fUeNMADDU6jBavV14SzXlKLj0yFS0cjxGf4TDcZaAJ\nqMnI+3JU2kkObnYGKRTB9VHnVJC9twni2aHY5eCMpaunz62qlS7KqMlRWLgXpSq2\n9O8DxN3k2WOZ0VpY2Aam+soKemqvDn+PYhmGWpvtZPivT10OFP3ZppxPpWFMSfrz\nr9p45fRpXHCd4Jzc+mH2cqOc/HRTGZ3imxYtgBdl/7VY+gsmANkfKThxQQb09Oz1\nRKTFJbkJYgoOdAuf8zZ6195vyqkYLqRsDWdRrCXEXTUILcUkeuUi147oy+cX1HKO\n/zWYtiNxAgMBAAECggEAAZCoTyfXBcP8DNukOlTgWLBvCfe+rqXWTh8/1IHQmTBH\nu+014fqx7G7wPrld/XKF6JgIELlzG6tcGfGCJVyitkIQht99wZe5jSjiHqRSfGK2\nhETB6K2OErEBLCU4GANvCr8BYa32GqdWFWk2CggfqegWk934LMg2DOqd4CL6H0QX\nEjcRrI2JQ0diGAbVGsrUONSPSWZ5d2MpmkJULo1dl79creFv8wJBLDje6LFFZzh4\nQM6hLGq4FEld1y28e9rCowYtZ6QaugIXwMtB7AE+XPoPCZ3tE7O6yWCKWJZ6vYO1\npQWxzdL3osQYI8jYx5cd5PefyWc9vZn8ATDuzFynAQKBgQD9yHd4h2LkSeMKLJcG\nMh4xGY4Bo16IMxPMUbzd5VjzvkfdBxf1V2T9hk2RFIRJ8ujyjQWMtfMk51JB5jZz\n6wmX9H7ACm/2B/8R1AwCav8KCXNPirgk2rDU5jLkyG3diZ31golKNnohLnyKsOet\ngzr4f0sllClW6y6uDJHg5Br1gQKBgQDdsVsXUYrG2O5nPCk9ccr0tIOX4jtD3KS8\n4Uug1Sokscdjqnd5lvqQT00QwuznEnAs1uTgre+jQMr0q0nMV2x11Ct7CcS6eLob\nRxA+vipprHChDJCHyHNpXIQIaphV5vNUfAl0SckFTZkLIVH8yWrPFjmmosLkjOGW\n+i0o2EmF8QKBgEDWvu9kZ7e7yO4Ihm1m0J/qz4VLoBNcOWqyV3a56ggcTXADJ/Pe\n6EZ90cOHYmUiUrHlpc1Vj1GWaEW985uaKVFRfjDCeeh6EokTjB3yCEcgMv3Xi0Sf\nOx6p0cbyDl/TkS/wsfLsCDgCEH++wvJp3N8wZpqrSASVAdAmFf9HSDwBAoGAJDm3\n7c6IQ8fs5PeisYSnqmbY3fe8wXELhkW2SviqI0bdkv6m+TpfhTdAG44Okg+kPt96\nlPA3KVEMGQDoVTiv420hEcDd4a6akpyBHg+K9KuV1+sqrtVlboEMnid07wyHFHYU\nQWlRLMmqSXRPZmQvTNmP4BfWiuwubLJCsNru4LECgYEAqdeZoPjjXlP3oaRydRdK\nW6sEYTWyr66FkhtGhOS+v9oDJ30dKpfC7WlGQ9j5o25OeB/Fe5cBEO0vyRVtoqFb\nIFWuz0+qozWMfJs5KGEjYeMCbVGPuYHuOPLbm0++D8tjsmCmSpVAKI9PKijSKl8u\n0ElFJb7/An0jzTSbapB+8ek=\n-----END PRIVATE KEY-----\n",
+  "client_email": "github-deployer@commitgraph.iam.gserviceaccount.com",
+  "client_id": "115693488168199621658",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/github-deployer%40commitgraph.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
