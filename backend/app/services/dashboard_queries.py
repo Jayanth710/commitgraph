@@ -17,10 +17,22 @@ def _serialize_row(row) -> dict[str, Any]:
     return d
 
 
-async def get_weekly_digest_data(db: AsyncSession, *, user_id: str) -> dict[str, Any]:
+async def get_weekly_digest_data(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    account_id: str | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"user_id": user_id}
+    extra_condition = ""
+
+    if account_id:
+        extra_condition = " AND a.id = :account_id "
+        params["account_id"] = account_id
+
     stats_result = await db.execute(
         text(
-            """
+            f"""
             SELECT
                 count(DISTINCT c.id) FILTER (WHERE c.detected_at >= now() - interval '7 days') as new_this_week,
                 count(DISTINCT c.id) FILTER (WHERE c.completed_at >= now() - interval '7 days') as completed_this_week,
@@ -46,9 +58,10 @@ async def get_weekly_digest_data(db: AsyncSession, *, user_id: str) -> dict[str,
             JOIN normalized_items ni ON ni.id = el.normalized_item_id
             JOIN accounts a ON a.id = ni.account_id
             WHERE a.user_id = :user_id
+            {extra_condition}
             """
         ),
-        {"user_id": user_id},
+        params,
     )
     stats = stats_result.mappings().first()
 
@@ -70,10 +83,11 @@ async def get_weekly_digest_data(db: AsyncSession, *, user_id: str) -> dict[str,
               AND c.due_date >= now()
               AND c.due_date < now() + interval '7 days'
               AND c.status NOT IN ('completed', 'abandoned')
+            {extra_condition}
             ORDER BY c.id, c.due_date ASC
             """
         ),
-        {"user_id": user_id},
+        params,
     )
     due_rows = [_serialize_row(r) for r in due_result.mappings().all()]
 

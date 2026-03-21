@@ -22,6 +22,7 @@ import { useDebouncedCallback } from "use-debounce";
 import { ListSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
 import PageTransition from "@/components/PageTransition";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 // import EmailComposer from "@/components/EmailComposer";
 import {
   DndContext,
@@ -112,6 +113,7 @@ function CommitmentsContent() {
   const searchParams = useSearchParams();
   const urlDirection = searchParams.get("direction");
   const urlStatus = searchParams.get("status");
+  const { activeAccountId } = useAccountFilter();
 
   const [tab, setTab] = useState<"outbound" | "inbound" | "all">(
     urlDirection === "inbound"
@@ -143,6 +145,7 @@ function CommitmentsContent() {
         ? await api.searchCommitments(params.toString())
         : await api.getCommitments(params.toString());
       setCommitments(data.commitments);
+      if (activeAccountId) params.set("account_id", activeAccountId);
     } catch (err) {
       console.error(err);
     } finally {
@@ -152,7 +155,7 @@ function CommitmentsContent() {
 
   useEffect(() => {
     fetchCommitments();
-  }, [fetchCommitments, tab, statusFilter, searchQuery]);
+  }, [fetchCommitments, tab, statusFilter, searchQuery, activeAccountId]);
 
   const handleStatusChange = useCallback(
     async (id: string, newStatus: string) => {
