@@ -1,5 +1,10 @@
 import axios from "axios";
 import { getToken, clearAuth } from "@/lib/auth";
+import type {
+  CommitmentDetailResponse,
+  CommitmentListResponse,
+  ReviewQueueResponse,
+} from "@/lib/types";
 
 const client = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
@@ -27,7 +32,6 @@ client.interceptors.response.use(
 );
 
 export const api = {
-  // Auth
   signup: (body: { firstname?: string; lastname?: string; email: string; password: string }) =>
     client.post("/auth/signup", body).then((r) => r.data),
   login: (body: { email: string; password: string }) =>
@@ -36,17 +40,29 @@ export const api = {
     client.post("/auth/google-login", body).then((r) => r.data),
   getMe: () => client.get("/auth/me").then((r) => r.data),
 
-  // Dashboard
   getStats: () => client.get("/api/stats").then((r) => r.data),
-  getCommitments: (params?: string) => client.get(`/api/commitments${params ? `?${params}` : ""}`).then((r) => r.data),
-  getCommitment: (id: string) => client.get(`/api/commitments/${id}`).then((r) => r.data),
+  getCommitments: (params?: string): Promise<CommitmentListResponse> =>
+    client.get(`/api/commitments${params ? `?${params}` : ""}`).then((r) => r.data),
+  getCommitment: (id: string): Promise<CommitmentDetailResponse> =>
+    client.get(`/api/commitments/${id}`).then((r) => r.data),
   reorderCommitments: (order: { id: string; priority: number }[]) =>
     client.patch("/api/commitments/reorder", { order }).then((r) => r.data),
-  updateCommitment: (id: string, body: any) => client.patch(`/api/commitments/${id}`, body).then((r) => r.data),
-  searchCommitments: (params: string) => client.get(`/api/commitments/search?${params}`).then((r) => r.data),
-  getReviewQueue: () => client.get("/api/review-queue").then((r) => r.data),
-  reviewAction: (id: string, action: string) => client.patch(`/api/review-queue/${id}`, { action }).then((r) => r.data),
-  getTimeline: (params?: string) => client.get(`/api/timeline${params ? `?${params}` : ""}`).then((r) => r.data),
+  updateCommitment: (id: string, body: Record<string, unknown>) =>
+    client.patch(`/api/commitments/${id}`, body).then((r) => r.data),
+  mergeCommitment: (id: string, targetCommitmentId: string) =>
+    client.post(`/api/commitments/${id}/merge`, {
+      target_commitment_id: targetCommitmentId,
+    }).then((r) => r.data),
+  searchCommitments: (params: string): Promise<CommitmentListResponse> =>
+    client.get(`/api/commitments/search?${params}`).then((r) => r.data),
+
+  getReviewQueue: (): Promise<ReviewQueueResponse> =>
+    client.get("/api/review-queue").then((r) => r.data),
+  reviewAction: (id: string, body: Record<string, unknown>) =>
+    client.patch(`/api/review-queue/${id}`, body).then((r) => r.data),
+
+  getTimeline: (params?: string) =>
+    client.get(`/api/timeline${params ? `?${params}` : ""}`).then((r) => r.data),
   getPersons: () => client.get("/api/persons").then((r) => r.data),
   getAccounts: () => client.get("/api/accounts").then((r) => r.data),
   disconnectAccount: (id: string) => client.delete(`/api/accounts/${id}`).then((r) => r.data),
@@ -55,7 +71,8 @@ export const api = {
   getWeeklyDigest: () => client.get("/api/digest/weekly").then((r) => r.data),
   sendEmail: (body: { to: string; subject: string; body: string; thread_id?: string; in_reply_to?: string; account_email: string }) =>
     client.post("/api/email/send", body).then((r) => r.data),
-  startGmailWatch: (email: string) => client.post(`/gmail/watch/start?email_address=${email}`).then((r) => r.data),
+  startGmailWatch: (email: string) =>
+    client.post(`/gmail/watch/start?email_address=${email}`).then((r) => r.data),
   createCalendarEvent: (commitmentId: string) =>
     client.post(`/api/commitments/${commitmentId}/calendar-event`).then((r) => r.data),
   deleteCalendarEvent: (commitmentId: string) =>
