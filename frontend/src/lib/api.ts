@@ -40,7 +40,8 @@ export const api = {
     client.post("/auth/google-login", body).then((r) => r.data),
   getMe: () => client.get("/auth/me").then((r) => r.data),
 
-  getStats: () => client.get("/api/stats").then((r) => r.data),
+    getStats: (params?: string) =>
+    client.get(`/api/stats${params ? `?${params}` : ""}`).then((r) => r.data),
   getCommitments: (params?: string): Promise<CommitmentListResponse> =>
     client.get(`/api/commitments${params ? `?${params}` : ""}`).then((r) => r.data),
   getCommitment: (id: string): Promise<CommitmentDetailResponse> =>
@@ -56,19 +57,23 @@ export const api = {
   searchCommitments: (params: string): Promise<CommitmentListResponse> =>
     client.get(`/api/commitments/search?${params}`).then((r) => r.data),
 
-  getReviewQueue: (): Promise<ReviewQueueResponse> =>
-    client.get("/api/review-queue").then((r) => r.data),
+  getReviewQueue: (params?: string): Promise<ReviewQueueResponse> =>
+    client.get(`/api/review-queue${params ? `?${params}` : ""}`).then((r) => r.data),
   reviewAction: (id: string, body: Record<string, unknown>) =>
     client.patch(`/api/review-queue/${id}`, body).then((r) => r.data),
 
   getTimeline: (params?: string) =>
     client.get(`/api/timeline${params ? `?${params}` : ""}`).then((r) => r.data),
-  getPersons: () => client.get("/api/persons").then((r) => r.data),
+  getPersons: (params?: string) =>
+    client.get(`/api/persons${params ? `?${params}` : ""}`).then((r) => r.data),
   getAccounts: () => client.get("/api/accounts").then((r) => r.data),
   disconnectAccount: (id: string) => client.delete(`/api/accounts/${id}`).then((r) => r.data),
   deleteUser: () => client.delete("/auth/me").then((r) => r.data),
-  getChartData: () => client.get("/api/stats/chart").then((r) => r.data),
-  getWeeklyDigest: () => client.get("/api/digest/weekly").then((r) => r.data),
+  getChartData: (params?: string) =>
+    client.get(`/api/stats/chart${params ? `?${params}` : ""}`).then((r) => r.data),
+  getWeeklyDigest: (params?: string) =>
+    client.get(`/api/digest/weekly${params ? `?${params}` : ""}`).then((r) => r.data),
+  
   sendEmail: (body: { to: string; subject: string; body: string; thread_id?: string; in_reply_to?: string; account_email: string }) =>
     client.post("/api/email/send", body).then((r) => r.data),
   startGmailWatch: (email: string) =>

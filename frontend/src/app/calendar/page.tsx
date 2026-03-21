@@ -10,17 +10,21 @@ import {
   addMonths, subMonths, eachDayOfInterval, format,
   isSameMonth, isSameDay, isToday, parseISO
 } from "date-fns";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 
 export default function CalendarPage() {
   const [commitments, setCommitments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const {activeAccountId} = useAccountFilter()
 
   useEffect(() => {
-    async function load() {
+        async function load() {
       try {
-        const data = await api.getCommitments("limit=200");
+        const params = new URLSearchParams({ limit: "200" });
+        if (activeAccountId) params.set("account_id", activeAccountId);
+        const data = await api.getCommitments(params.toString());
         setCommitments(data.commitments.filter((c: any) => c.due_date));
       } catch (err) {
         console.error(err);
@@ -29,7 +33,7 @@ export default function CalendarPage() {
       }
     }
     load();
-  }, []);
+  }, [activeAccountId]);
 
   if (loading) return <ListSkeleton count={5} />;
 
