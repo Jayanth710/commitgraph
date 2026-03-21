@@ -3,6 +3,8 @@ import { getToken, clearAuth } from "@/lib/auth";
 import type {
   CommitmentDetailResponse,
   CommitmentListResponse,
+  JobApplicationDetailResponse,
+  JobApplicationListResponse,
   ReviewQueueResponse,
 } from "@/lib/types";
 
@@ -73,6 +75,12 @@ export const api = {
     client.get(`/api/stats/chart${params ? `?${params}` : ""}`).then((r) => r.data),
   getWeeklyDigest: (params?: string) =>
     client.get(`/api/digest/weekly${params ? `?${params}` : ""}`).then((r) => r.data),
+  getJobApplications: (params?: string): Promise<JobApplicationListResponse> =>
+    client.get(`/api/job-applications${params ? `?${params}` : ""}`).then((r) => r.data),
+  getJobApplication: (id: string): Promise<JobApplicationDetailResponse> =>
+    client.get(`/api/job-applications/${id}`).then((r) => r.data),
+  updateJobApplication: (id: string, body: Record<string, unknown>) =>
+    client.patch(`/api/job-applications/${id}`, body).then((r) => r.data),
   
   sendEmail: (body: { to: string; subject: string; body: string; thread_id?: string; in_reply_to?: string; account_email: string }) =>
     client.post("/api/email/send", body).then((r) => r.data),

@@ -60,6 +60,12 @@ ROUTING_TABLE: dict[str, dict[str, Any]] = {
         "max_tokens": 1024,
         "temperature": 0.1,   
     },
+    "job_application_extraction": {
+        "model": "gpt-4o-mini",
+        "fallbacks": ["anthropic/claude-haiku-4-5-20241022", "gemini/gemini-2.0-flash"],
+        "max_tokens": 1024,
+        "temperature": 0.1,
+    },
     "commitment_reconciliation": {
         # Added anthropic/ prefix here
         "model": "anthropic/claude-sonnet-4-20250514",
