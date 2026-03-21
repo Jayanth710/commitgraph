@@ -691,11 +691,11 @@ async def create_calendar_event_for_commitment(
     user_id = str(user["id"])
 
     async with AsyncSessionLocal() as db:
-        # Verify ownership and get commitment + account details.
         result = await db.execute(
             text(
                 """
                 SELECT c.id, c.summary, c.due_date, c.direction,
+                       c.status, c.confidence_score, c.calendar_event_id,
                        p_owner.email_addresses[1] as owner_email,
                        p_target.email_addresses[1] as target_email,
                        a.id as account_id
@@ -719,6 +719,24 @@ async def create_calendar_event_for_commitment(
     if not row["due_date"]:
         raise HTTPException(status_code=400, detail="Commitment has no due date")
 
+    if row["status"] not in {"confirmed", "in_progress"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Only confirmed or in-progress commitments can be added to calendar",
+        )
+
+    if (row["confidence_score"] or 0) < 0.8:
+        raise HTTPException(
+            status_code=400,
+            detail="Commitment confidence is too low to add to calendar",
+        )
+
+    if row["calendar_event_id"]:
+        return {
+            "message": "Calendar event already exists",
+            "event_id": row["calendar_event_id"],
+        }
+
     event = await create_commitment_event(
         account_id=str(row["account_id"]),
         summary=row["summary"],
@@ -732,16 +750,84 @@ async def create_calendar_event_for_commitment(
     if not event:
         raise HTTPException(status_code=500, detail="Failed to create calendar event")
 
-    # Save calendar event ID to the commitment
     async with AsyncSessionLocal() as db:
         async with db.begin():
             await db.execute(
-                text("UPDATE commitments SET calendar_event_id = :eid WHERE id = :cid"),
-                {"eid": event.get("id"), "cid": commitment_id},
+                text(
+                    """
+                    UPDATE commitments
+                    SET calendar_event_id = :eid,
+                        updated_at = now()
+                    WHERE id = :cid
+                    """
+                ),
+                {
+                    "eid": event.get("id"),
+                    "cid": commitment_id,
+                },
             )
 
     return {
         "message": "Calendar event created",
         "event_id": event.get("id"),
-        "event_link": event.get("htmlLink"),
+    }
+
+@router.delete("/commitments/{commitment_id}/calendar-event")
+async def delete_calendar_event_for_commitment(
+    commitment_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Delete a Google Calendar event linked to a commitment."""
+    from app.services.gcal_delete import delete_commitment_event
+
+    user_id = str(user["id"])
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            text(
+                """
+                SELECT c.id, c.calendar_event_id, a.id as account_id
+                FROM commitments c
+                JOIN evidence_links el ON el.commitment_id = c.id
+                JOIN normalized_items ni ON ni.id = el.normalized_item_id
+                JOIN accounts a ON a.id = ni.account_id
+                WHERE c.id = :cid AND a.user_id = :uid
+                LIMIT 1
+                """
+            ),
+            {"cid": commitment_id, "uid": user_id},
+        )
+        row = result.mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Commitment not found")
+
+    if not row["calendar_event_id"]:
+        raise HTTPException(status_code=400, detail="No calendar event linked")
+
+    deleted = await delete_commitment_event(
+        account_id=str(row["account_id"]),
+        event_id=row["calendar_event_id"],
+    )
+
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete calendar event")
+
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            await db.execute(
+                text(
+                    """
+                    UPDATE commitments
+                    SET calendar_event_id = NULL,
+                        updated_at = now()
+                    WHERE id = :cid
+                    """
+                ),
+                {"cid": commitment_id},
+            )
+
+    return {
+        "message": "Calendar event removed",
+        "commitment_id": commitment_id,
     }
