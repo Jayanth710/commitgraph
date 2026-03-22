@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -24,13 +24,17 @@ def _clean_text(value, fallback: str | None = None) -> str | None:
     return cleaned or fallback
 
 
-def _clean_time(value, fallback: str) -> str:
-    if value is None:
-        return fallback
-    cleaned = str(value).strip()
+def _parse_time_value(value, fallback: object) -> time:
+    source = value if value not in (None, "") else fallback
+    if isinstance(source, time):
+        return source.replace(second=0, microsecond=0)
+
+    cleaned = str(source).strip()
     if not cleaned:
-        return fallback
-    return cleaned[:5]
+        cleaned = str(fallback).strip()
+
+    parsed = time.fromisoformat(cleaned[:8])
+    return parsed.replace(second=0, microsecond=0)
 
 
 def _brief_subject(brief_type: str, brief_date: date) -> str:
@@ -109,9 +113,9 @@ async def update_delivery_preference(
         "destination": _clean_text(body.get("destination"), current["destination"]),
         "timezone": _clean_text(body.get("timezone"), current["timezone"]) or "America/Denver",
         "morning_enabled": body.get("morning_enabled", current["morning_enabled"]),
-        "morning_time": _clean_time(body.get("morning_time"), str(current["morning_time"])[:5]),
+        "morning_time": _parse_time_value(body.get("morning_time"), current["morning_time"]),
         "night_enabled": body.get("night_enabled", current["night_enabled"]),
-        "night_time": _clean_time(body.get("night_time"), str(current["night_time"])[:5]),
+        "night_time": _parse_time_value(body.get("night_time"), current["night_time"]),
         "sender_account_id": _clean_nullable_uuid(
             body.get("sender_account_id", current["sender_account_id"])
         ),
