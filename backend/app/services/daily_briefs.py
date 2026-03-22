@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import text
