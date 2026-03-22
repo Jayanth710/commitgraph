@@ -3,6 +3,8 @@ import { getToken, clearAuth } from "@/lib/auth";
 import type {
   CommitmentDetailResponse,
   CommitmentListResponse,
+  DailyBriefListResponse,
+  DailyBriefRun,
   JobApplicationDetailResponse,
   JobApplicationListResponse,
   ReviewQueueResponse,
@@ -75,6 +77,20 @@ export const api = {
     client.get(`/api/stats/chart${params ? `?${params}` : ""}`).then((r) => r.data),
   getWeeklyDigest: (params?: string) =>
     client.get(`/api/digest/weekly${params ? `?${params}` : ""}`).then((r) => r.data),
+  getDailyBriefs: (params?: string): Promise<DailyBriefListResponse> =>
+    client.get(`/api/daily-briefs${params ? `?${params}` : ""}`).then((r) => r.data),
+  getLatestDailyBrief: (params: string): Promise<{ run: DailyBriefRun | null }> =>
+    client.get(`/api/daily-briefs/latest?${params}`).then((r) => r.data),
+  getDailyBrief: (id: string): Promise<{ run: DailyBriefRun }> =>
+    client.get(`/api/daily-briefs/${id}`).then((r) => r.data),
+  generateDailyBrief: (body: { brief_type: "morning" | "night"; account_id?: string | null; brief_date?: string }) =>
+    client.post("/api/daily-briefs/generate", body).then((r) => r.data),
+  getBriefDeliveryPreferences: () =>
+    client.get("/api/brief-delivery/preferences").then((r) => r.data),
+  updateBriefDeliveryPreferences: (body: Record<string, unknown>) =>
+    client.put("/api/brief-delivery/preferences", body).then((r) => r.data),
+  getBriefDeliveryRuns: () =>
+    client.get("/api/brief-delivery/runs").then((r) => r.data),
   getJobApplications: (params?: string): Promise<JobApplicationListResponse> =>
     client.get(`/api/job-applications${params ? `?${params}` : ""}`).then((r) => r.data),
   getJobApplication: (id: string): Promise<JobApplicationDetailResponse> =>
