@@ -115,7 +115,6 @@ async def list_new_message_ids(
     while True:
         params: list[tuple[str, str]] = [
             ("startHistoryId", start_history_id),
-            ("historyTypes", "messageAdded"),
             ("maxResults", "500"),
         ]
         if page_token:
@@ -130,10 +129,8 @@ async def list_new_message_ids(
         )
 
         for history_record in payload.get("history", []):
-            for message_added in history_record.get("messagesAdded", []):
-                message = message_added.get("message", {})
-                message_id = message.get("id")
-                if message_id and message_id not in seen:
+            for message_id in _extract_history_message_ids(history_record):
+                if message_id not in seen:
                     seen.add(message_id)
                     message_ids.append(message_id)
 
@@ -142,6 +139,34 @@ async def list_new_message_ids(
             break
 
     return message_ids
+
+
+def _extract_history_message_ids(history_record: dict[str, Any]) -> list[str]:
+    collected: list[str] = []
+
+    def add_from_message_container(container: Any) -> None:
+        if not isinstance(container, dict):
+            return
+        message = container.get("message") if "message" in container else container
+        if not isinstance(message, dict):
+            return
+        message_id = message.get("id")
+        if message_id:
+            collected.append(message_id)
+
+    for key in ("messagesAdded", "messages"):
+        for item in history_record.get(key, []) or []:
+            add_from_message_container(item)
+
+    for item in history_record.get("labelsAdded", []) or []:
+        if not isinstance(item, dict):
+            continue
+        label_ids = item.get("labelIds") or []
+        if label_ids and "INBOX" not in label_ids:
+            continue
+        add_from_message_container(item)
+
+    return collected
 
 
 async def get_full_message(

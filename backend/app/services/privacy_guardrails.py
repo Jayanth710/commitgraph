@@ -6,6 +6,7 @@ from typing import Any
 MAX_LLM_SUBJECT_CHARS = 200
 MAX_LLM_BODY_CHARS = 1800
 MAX_LLM_RECIPIENTS = 10
+MAX_FORWARD_UNWRAP_DEPTH = 6
 
 _QUOTED_HISTORY_PATTERNS = [
     re.compile(r"^\s*>"),
@@ -18,6 +19,11 @@ _QUOTED_HISTORY_PATTERNS = [
     re.compile(r"^\s*-{2,}\s*Original Message\s*-{2,}\s*$", re.IGNORECASE),
     re.compile(r"^\s*Begin forwarded message:\s*$", re.IGNORECASE),
 ]
+_FORWARDED_MARKERS = [
+    re.compile(r"^\s*-{2,}\s*Forwarded message\s*-{2,}\s*$", re.IGNORECASE),
+    re.compile(r"^\s*Begin forwarded message:\s*$", re.IGNORECASE),
+]
+_FORWARDED_HEADER = re.compile(r"^\s*(From|Date|Subject|To|Cc|Bcc):\s+", re.IGNORECASE)
 
 _SIGNATURE_DELIMITER = re.compile(r"^\s*--\s*$")
 _SIGNATURE_FOOTERS = [
@@ -63,6 +69,49 @@ def _strip_quoted_history(lines: list[str]) -> list[str]:
             break
         kept.append(line)
     return kept
+
+
+def _extract_forwarded_payload(lines: list[str], marker_index: int) -> list[str]:
+    i = marker_index + 1
+    saw_header = False
+
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped:
+            if saw_header:
+                i += 1
+                while i < len(lines) and not lines[i].strip():
+                    i += 1
+                return lines[i:]
+            i += 1
+            continue
+
+        if _FORWARDED_HEADER.match(lines[i]):
+            saw_header = True
+            i += 1
+            continue
+
+        break
+
+    return lines[marker_index + 1 :]
+
+
+def _unwrap_forwarded_content(lines: list[str]) -> list[str]:
+    current = lines
+    for _ in range(MAX_FORWARD_UNWRAP_DEPTH):
+        marker_index = next(
+            (idx for idx, line in enumerate(current) if any(pattern.match(line) for pattern in _FORWARDED_MARKERS)),
+            None,
+        )
+        if marker_index is None:
+            break
+
+        candidate = _extract_forwarded_payload(current, marker_index)
+        if candidate == current:
+            break
+        current = candidate
+
+    return current
 
 
 def _strip_signature(lines: list[str]) -> list[str]:
@@ -120,7 +169,7 @@ def sanitize_email_body_for_llm(body_text: str | None) -> str:
     if not normalized:
         return ""
 
-    lines = normalized.splitlines()
+    lines = _unwrap_forwarded_content(normalized.splitlines())
     latest_only = _strip_quoted_history(lines)
     without_signature = _strip_signature(latest_only)
     text = "\n".join(without_signature).strip() or "\n".join(latest_only).strip()
