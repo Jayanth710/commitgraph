@@ -18,6 +18,8 @@ services:
       - ./backend/migrations/004_calendar_event_id.sql:/docker-entrypoint-initdb.d/004_calendar_event_id.sql:ro
       - ./backend/migrations/005_calendar_event_link.sql:/docker-entrypoint-initdb.d/005_calendar_event_link.sql:ro
       - ./backend/migrations/006_job_applications.sql:/docker-entrypoint-initdb.d/006_job_applications.sql:ro
+      - ./backend/migrations/007_daily_briefs.sql:/docker-entrypoint-initdb.d/007_daily_briefs.sql:ro
+      - ./backend/migrations/008_brief_delivery.sql:/docker-entrypoint-initdb.d/008_brief_delivery.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U commitgraph -d commitgraph"]
       interval: 5s

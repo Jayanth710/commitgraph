@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     google_signin_redirect_uri: str = "http://localhost:8000/auth/google-signin/callback"
     google_signin_scope: str = "openid email profile"
 
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
