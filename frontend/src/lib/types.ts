@@ -133,3 +133,70 @@ export type JobApplicationDetailResponse = {
   job_application: JobApplication;
   events: JobApplicationEvent[];
 };
+
+export type DailyBriefType = "morning" | "night";
+
+export type DailyBriefItem = {
+  id: string;
+  section: string;
+  title: string;
+  body?: string | null;
+  item_kind?: string | null;
+  order_index: number;
+  related_commitment_id?: string | null;
+  related_job_application_id?: string | null;
+  related_normalized_item_id?: string | null;
+  created_at?: string;
+};
+
+export type DailyBriefRun = {
+  id: string;
+  user_id: string;
+  account_id?: string | null;
+  brief_type: DailyBriefType;
+  brief_date: string;
+  summary_markdown: string;
+  stats_json?: Record<string, number> | null;
+  stats?: Record<string, number> | null;
+  created_at?: string;
+  updated_at?: string;
+  items?: DailyBriefItem[];
+  sections?: Record<string, DailyBriefItem[]>;
+};
+
+export type DailyBriefListResponse = {
+  runs: DailyBriefRun[];
+  total: number;
+};
+
+export type BriefDeliveryPreference = {
+  id: string;
+  user_id: string;
+  channel: "email" | "sms";
+  destination?: string | null;
+  timezone: string;
+  morning_enabled: boolean;
+  morning_time: string;
+  night_enabled: boolean;
+  night_time: string;
+  sender_account_id?: string | null;
+  account_id?: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type BriefDeliveryRun = {
+  id: string;
+  brief_run_id?: string | null;
+  user_id: string;
+  preference_id?: string | null;
+  channel: "email" | "sms";
+  destination?: string | null;
+  brief_type: DailyBriefType;
+  brief_date: string;
+  status: "pending" | "sent" | "failed" | "skipped";
+  error_message?: string | null;
+  sent_at?: string | null;
+  created_at?: string;
+};

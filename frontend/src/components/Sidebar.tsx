@@ -6,7 +6,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, CheckCircle, AlertTriangle, Clock,
-  Users, Settings, Waypoints, Menu, X, CalendarDays, FileText, Briefcase
+  Users, Settings, Waypoints, Menu, X, CalendarDays, FileText, Briefcase, Sunrise
 } from "lucide-react";
 
 // Add after Calendar:
@@ -81,6 +81,7 @@ useEffect(() => {
     { href: "/timeline", label: "Timeline", icon: Clock, badgeKey: "", badgeColor: "" },
     { href: "/persons", label: "People", icon: Users, badgeKey: "", badgeColor: "" },
     { href: "/calendar", label: "Calendar", icon: CalendarDays, badgeKey: "", badgeColor: "" },
+    { href: "/briefs", label: "Daily Briefs", icon: Sunrise, badgeKey: "", badgeColor: "" },
     { href: "/digest", label: "Weekly Digest", icon: FileText, badgeKey: "", badgeColor: "" },
     { href: "/applications", label: "Applications", icon: Briefcase, badgeKey: "", badgeColor: "" },
     { href: "/settings", label: "Settings", icon: Settings, badgeKey: "", badgeColor: "" },
