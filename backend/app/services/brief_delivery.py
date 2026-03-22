@@ -11,6 +11,28 @@ from app.services.email_sender import send_email_via_gmail
 from app.services.sms_sender import send_sms_message
 
 
+def _clean_nullable_uuid(value):
+    if value in ("", "null", None):
+        return None
+    return value
+
+
+def _clean_text(value, fallback: str | None = None) -> str | None:
+    if value is None:
+        return fallback
+    cleaned = str(value).strip()
+    return cleaned or fallback
+
+
+def _clean_time(value, fallback: str) -> str:
+    if value is None:
+        return fallback
+    cleaned = str(value).strip()
+    if not cleaned:
+        return fallback
+    return cleaned[:5]
+
+
 def _brief_subject(brief_type: str, brief_date: date) -> str:
     return f"CommitGraph {brief_type.title()} Brief - {brief_date.isoformat()}"
 
@@ -84,14 +106,16 @@ async def update_delivery_preference(
     current = await get_or_create_delivery_preference(db, user_id=user_id)
     updates = {
         "channel": body.get("channel", current["channel"]),
-        "destination": body.get("destination", current["destination"]),
-        "timezone": body.get("timezone", current["timezone"]),
+        "destination": _clean_text(body.get("destination"), current["destination"]),
+        "timezone": _clean_text(body.get("timezone"), current["timezone"]) or "America/Denver",
         "morning_enabled": body.get("morning_enabled", current["morning_enabled"]),
-        "morning_time": body.get("morning_time", current["morning_time"]),
+        "morning_time": _clean_time(body.get("morning_time"), str(current["morning_time"])[:5]),
         "night_enabled": body.get("night_enabled", current["night_enabled"]),
-        "night_time": body.get("night_time", current["night_time"]),
-        "sender_account_id": body.get("sender_account_id", current["sender_account_id"]),
-        "account_id": body.get("account_id", current["account_id"]),
+        "night_time": _clean_time(body.get("night_time"), str(current["night_time"])[:5]),
+        "sender_account_id": _clean_nullable_uuid(
+            body.get("sender_account_id", current["sender_account_id"])
+        ),
+        "account_id": _clean_nullable_uuid(body.get("account_id", current["account_id"])),
         "is_active": body.get("is_active", current["is_active"]),
     }
 
