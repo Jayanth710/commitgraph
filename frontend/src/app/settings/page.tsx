@@ -21,7 +21,8 @@ export default function SettingsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [deliveryPreference, setDeliveryPreference] = useState<BriefDeliveryPreference | null>(null);
+  const [deliveryPreference, setDeliveryPreference] =
+    useState<BriefDeliveryPreference | null>(null);
   const [deliveryRuns, setDeliveryRuns] = useState<BriefDeliveryRun[]>([]);
   const [savingDelivery, setSavingDelivery] = useState(false);
 
@@ -97,14 +98,16 @@ export default function SettingsPage() {
     try {
       const result = await api.updateBriefDeliveryPreferences({
         channel: deliveryPreference.channel,
-        destination: deliveryPreference.destination,
-        timezone: deliveryPreference.timezone,
+        destination:
+          deliveryPreference.destination?.trim() ||
+          (deliveryPreference.channel === "email" ? user?.email || null : null),
+        timezone: deliveryPreference.timezone?.trim() || "America/Denver",
         morning_enabled: deliveryPreference.morning_enabled,
-        morning_time: deliveryPreference.morning_time,
+        morning_time: (deliveryPreference.morning_time || "08:00").slice(0, 5),
         night_enabled: deliveryPreference.night_enabled,
-        night_time: deliveryPreference.night_time,
-        sender_account_id: deliveryPreference.sender_account_id,
-        account_id: deliveryPreference.account_id,
+        night_time: (deliveryPreference.night_time || "20:00").slice(0, 5),
+        sender_account_id: deliveryPreference.sender_account_id || null,
+        account_id: deliveryPreference.account_id || null,
         is_active: deliveryPreference.is_active,
       });
       setDeliveryPreference(result.preference);
@@ -236,7 +239,10 @@ export default function SettingsPage() {
                               await api.startGmailWatch(a.email_address);
                               toast.success("Gmail watch started!");
                             } catch (err: any) {
-                              toast.error(err.response?.data?.detail || "Failed to start watch");
+                              toast.error(
+                                err.response?.data?.detail ||
+                                  "Failed to start watch",
+                              );
                             }
                           }}
                           className="flex items-center gap-1.5 text-xs px-3 py-1.5 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
@@ -288,12 +294,19 @@ export default function SettingsPage() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Channel</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Channel
+                  </label>
                   <select
                     value={deliveryPreference.channel}
                     onChange={(e) =>
                       setDeliveryPreference((prev) =>
-                        prev ? { ...prev, channel: e.target.value as "email" | "sms" } : prev,
+                        prev
+                          ? {
+                              ...prev,
+                              channel: e.target.value as "email" | "sms",
+                            }
+                          : prev,
                       )
                     }
                     className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 text-sm"
@@ -305,7 +318,9 @@ export default function SettingsPage() {
 
                 <div>
                   <label className="block text-sm font-medium mb-2">
-                    {deliveryPreference.channel === "sms" ? "Phone number" : "Email destination"}
+                    {deliveryPreference.channel === "sms"
+                      ? "Phone number"
+                      : "Email destination"}
                   </label>
                   <input
                     value={deliveryPreference.destination || ""}
@@ -324,7 +339,9 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Timezone</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Timezone
+                  </label>
                   <input
                     value={deliveryPreference.timezone}
                     onChange={(e) =>
@@ -338,12 +355,16 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Brief scope</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Brief scope
+                  </label>
                   <select
                     value={deliveryPreference.account_id || ""}
                     onChange={(e) =>
                       setDeliveryPreference((prev) =>
-                        prev ? { ...prev, account_id: e.target.value || null } : prev,
+                        prev
+                          ? { ...prev, account_id: e.target.value || null }
+                          : prev,
                       )
                     }
                     className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 text-sm"
@@ -365,14 +386,19 @@ export default function SettingsPage() {
                       checked={deliveryPreference.morning_enabled}
                       onChange={(e) =>
                         setDeliveryPreference((prev) =>
-                          prev ? { ...prev, morning_enabled: e.target.checked } : prev,
+                          prev
+                            ? { ...prev, morning_enabled: e.target.checked }
+                            : prev,
                         )
                       }
                     />
                   </div>
                   <input
                     type="time"
-                    value={(deliveryPreference.morning_time || "08:00").slice(0, 5)}
+                    value={(deliveryPreference.morning_time || "08:00").slice(
+                      0,
+                      5,
+                    )}
                     onChange={(e) =>
                       setDeliveryPreference((prev) =>
                         prev ? { ...prev, morning_time: e.target.value } : prev,
@@ -390,14 +416,19 @@ export default function SettingsPage() {
                       checked={deliveryPreference.night_enabled}
                       onChange={(e) =>
                         setDeliveryPreference((prev) =>
-                          prev ? { ...prev, night_enabled: e.target.checked } : prev,
+                          prev
+                            ? { ...prev, night_enabled: e.target.checked }
+                            : prev,
                         )
                       }
                     />
                   </div>
                   <input
                     type="time"
-                    value={(deliveryPreference.night_time || "20:00").slice(0, 5)}
+                    value={(deliveryPreference.night_time || "20:00").slice(
+                      0,
+                      5,
+                    )}
                     onChange={(e) =>
                       setDeliveryPreference((prev) =>
                         prev ? { ...prev, night_time: e.target.value } : prev,
@@ -408,12 +439,19 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Sender Gmail account</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Sender Gmail account
+                  </label>
                   <select
                     value={deliveryPreference.sender_account_id || ""}
                     onChange={(e) =>
                       setDeliveryPreference((prev) =>
-                        prev ? { ...prev, sender_account_id: e.target.value || null } : prev,
+                        prev
+                          ? {
+                              ...prev,
+                              sender_account_id: e.target.value || null,
+                            }
+                          : prev,
                       )
                     }
                     className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 text-sm"
@@ -436,7 +474,9 @@ export default function SettingsPage() {
                       checked={deliveryPreference.is_active}
                       onChange={(e) =>
                         setDeliveryPreference((prev) =>
-                          prev ? { ...prev, is_active: e.target.checked } : prev,
+                          prev
+                            ? { ...prev, is_active: e.target.checked }
+                            : prev,
                         )
                       }
                     />
@@ -447,7 +487,8 @@ export default function SettingsPage() {
 
               <div className="mt-4 flex items-center justify-between gap-4">
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  SMS delivery requires Twilio to be configured on the backend. Email delivery uses a connected Gmail account.
+                  SMS delivery requires Twilio to be configured on the backend.
+                  Email delivery uses a connected Gmail account.
                 </p>
                 <button
                   onClick={handleSaveDeliveryPreference}
@@ -467,7 +508,8 @@ export default function SettingsPage() {
             <ListSkeleton count={2} />
           ) : deliveryRuns.length === 0 ? (
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              No deliveries yet. Save your preferences and let the scheduler send the next brief.
+              No deliveries yet. Save your preferences and let the scheduler
+              send the next brief.
             </p>
           ) : (
             <div className="space-y-3">
@@ -478,10 +520,14 @@ export default function SettingsPage() {
                 >
                   <div>
                     <p className="text-sm font-medium">
-                      {run.brief_type} brief · {run.channel} · {run.destination || "default destination"}
+                      {run.brief_type} brief · {run.channel} ·{" "}
+                      {run.destination || "default destination"}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {new Date(run.brief_date).toLocaleDateString()} · {run.sent_at ? new Date(run.sent_at).toLocaleString() : "Not sent yet"}
+                      {new Date(run.brief_date).toLocaleDateString()} ·{" "}
+                      {run.sent_at
+                        ? new Date(run.sent_at).toLocaleString()
+                        : "Not sent yet"}
                     </p>
                   </div>
                   <div className="text-right">
@@ -489,7 +535,9 @@ export default function SettingsPage() {
                       {run.status}
                     </span>
                     {run.error_message && (
-                      <p className="text-xs text-red-500 mt-1">{run.error_message}</p>
+                      <p className="text-xs text-red-500 mt-1">
+                        {run.error_message}
+                      </p>
                     )}
                   </div>
                 </div>
