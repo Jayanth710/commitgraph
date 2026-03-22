@@ -18,6 +18,11 @@ import json
 import logging
 
 from app.services.llm import llm_completion
+from app.services.privacy_guardrails import (
+    minimize_recipients_for_llm,
+    sanitize_email_body_for_llm,
+    sanitize_email_subject,
+)
 from app.services.schemas import ExtractionResponse
 
 logger = logging.getLogger(__name__)
@@ -87,6 +92,11 @@ Return ONLY valid JSON matching this exact schema:
 }
 
 If no commitments are found, return: {"commitments": []}
+
+The email body you receive may already be privacy-filtered:
+- only the newest relevant message may be included
+- quoted history and signatures may be removed
+- sensitive numbers, addresses, URLs, and tokens may be redacted
 
 Do NOT wrap in markdown code fences. Return raw JSON only.\
 """
@@ -279,9 +289,9 @@ def _build_email_payload(
             "account_owner_email": account_owner_email,
             "sender_email": sender_email,
             "sender_name": sender_name,
-            "recipients": recipients,
-            "subject": subject or "(no subject)",
-            "body_text": (body_text or "")[:4000],  # Truncate huge emails
+            "recipients": minimize_recipients_for_llm(recipients),
+            "subject": sanitize_email_subject(subject),
+            "body_text": sanitize_email_body_for_llm(body_text),
             "sent_date": sent_date,
         },
         ensure_ascii=False,
