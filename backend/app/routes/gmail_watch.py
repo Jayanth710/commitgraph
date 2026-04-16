@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 
-from app.core.security import decrypt_token
 from app.db.session import AsyncSessionLocal
+from app.services.gmail_api import GmailApiError
 from app.services.gmail_watch import start_gmail_watch
 
 router = APIRouter(prefix="/gmail/watch", tags=["gmail-watch"])
@@ -16,7 +16,7 @@ async def gmail_watch_start(email_address: str):
         result = await session.execute(
             text(
                 """
-                SELECT id, access_token_encrypted
+                SELECT id, access_token_encrypted, refresh_token_encrypted
                 FROM accounts
                 WHERE provider = 'gmail' AND email_address = :email_address
                 LIMIT 1
@@ -24,26 +24,21 @@ async def gmail_watch_start(email_address: str):
             ),
             {"email_address": email_address},
         )
-        row = result.first()
+        row = result.mappings().first()
 
         if not row:
             raise HTTPException(status_code=404, detail="Gmail account not found")
 
-        account_id = row[0]
-        access_token_encrypted = row[1]
+        account_id = row["id"]
+        access_token_encrypted = row["access_token_encrypted"]
 
         if not access_token_encrypted:
             raise HTTPException(status_code=400, detail="No access token stored")
 
         try:
-            access_token = decrypt_token(access_token_encrypted)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail="Stored Gmail access token could not be decrypted",
-            ) from exc
-
-        watch_data = await start_gmail_watch(access_token)
+            watch_data = await start_gmail_watch(session, dict(row))
+        except GmailApiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         history_id = watch_data.get("historyId")
         expiration_ms = watch_data.get("expiration")
