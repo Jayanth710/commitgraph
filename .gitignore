@@ -26,4 +26,5 @@ frontend/next-env.d.ts
 ## Deployment tool state
 .vercel/
 frontend/.vercel/
-.ruff_cache
+.ruff_cachebackend/evaluation/
+backend/evaluation/

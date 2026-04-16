@@ -8,12 +8,13 @@ Falls back to Redis queue if inline processing fails.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
@@ -23,6 +24,17 @@ from app.services.redis_streams import get_redis_client
 router = APIRouter(prefix="/api/webhooks", tags=["gmail-webhooks"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
+_webhook_locks: dict[str, asyncio.Lock] = {}
+_webhook_locks_guard = asyncio.Lock()
+
+
+async def _get_webhook_lock(email_address: str) -> asyncio.Lock:
+    async with _webhook_locks_guard:
+        lock = _webhook_locks.get(email_address)
+        if lock is None:
+            lock = asyncio.Lock()
+            _webhook_locks[email_address] = lock
+        return lock
 
 
 @router.post("/gmail", status_code=status.HTTP_200_OK)
@@ -45,41 +57,47 @@ async def gmail_webhook(request: Request):
 
     logger.info("Gmail webhook: email=%s historyId=%s", email_address, history_id)
 
-    # Try inline processing first (production mode).
-    if settings.app_env == "production":
+    lock = await _get_webhook_lock(email_address)
+    async with lock:
+        # Try inline processing first (production mode).
+        if settings.app_env == "production":
+            try:
+                async with AsyncSessionLocal() as session:
+                    result = await process_gmail_push_notification(
+                        session,
+                        None,
+                        email_address=email_address,
+                        latest_history_id=history_id,
+                    )
+                logger.info("Webhook inline processing complete: %s", result)
+                return {"status": "processed", "result": str(result)}
+
+            except Exception:
+                logger.exception("Inline processing failed, falling back to queue")
+                # Fall through to queue below.
+
+        # Queue to Redis (local dev or fallback).
+        redis = None
         try:
             redis = get_redis_client()
-            async with AsyncSessionLocal() as session:
-                result = await process_gmail_push_notification(
-                    session,
-                    redis,
-                    email_address=email_address,
-                    latest_history_id=history_id,
-                )
-            await redis.aclose()
-            logger.info("Webhook inline processing complete: %s", result)
-            return {"status": "processed", "result": str(result)}
+            await redis.xadd(
+                settings.stream_ingest_raw,
+                {
+                    "provider": "gmail",
+                    "email_address": email_address,
+                    "history_id": history_id,
+                    "enqueued_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            logger.info("Queued to Redis: email=%s historyId=%s", email_address, history_id)
+            return {"status": "queued"}
 
-        except Exception:
-            logger.exception("Inline processing failed, falling back to queue")
-            # Fall through to queue below.
-
-    # Queue to Redis (local dev or fallback).
-    try:
-        redis = get_redis_client()
-        await redis.xadd(
-            settings.stream_ingest_raw,
-            {
-                "provider": "gmail",
-                "email_address": email_address,
-                "history_id": history_id,
-                "enqueued_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-        await redis.aclose()
-        logger.info("Queued to Redis: email=%s historyId=%s", email_address, history_id)
-        return {"status": "queued"}
-
-    except Exception as exc:
-        logger.exception("Failed to queue Gmail notification")
-        return {"status": "error", "detail": str(exc)}
+        except Exception as exc:
+            logger.exception("Failed to queue Gmail notification")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Gmail webhook processing failed and Redis fallback is unavailable: {exc}",
+            ) from exc
+        finally:
+            if redis is not None:
+                await redis.aclose()

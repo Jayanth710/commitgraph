@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 from app.services.inline_processor import process_normalized_item_inline
-from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
@@ -30,11 +29,12 @@ def build_idempotency_key(account_id: str, message_id: str) -> str:
 
 async def process_gmail_push_notification(
     db: AsyncSession,
-    redis: Redis,
+    redis=None,
     *,
     email_address: str,
     latest_history_id: str,
 ) -> dict[str, Any]:
+    pending_publications: list[dict[str, str]] = []
     normalized_ids = []  # Collect for post-commit extraction
 
     try:
@@ -128,25 +128,16 @@ async def process_gmail_push_notification(
                 if normalized_item is None:
                     raise RuntimeError(f"normalized_item missing for source_item_id={source_item_id}")
 
-                emit_result = await publish_normalized_event_once(
-                    redis,
-                    normalized_item_id=str(normalized_item["id"]),
-                    source_item_id=source_item_id,
-                    account_id=str(account["id"]),
-                    email_address=email_address,
-                    provider_id=provider_id,
-                    thread_id=normalized_item["thread_id"],
+                pending_publications.append(
+                    {
+                        "normalized_item_id": str(normalized_item["id"]),
+                        "source_item_id": source_item_id,
+                        "account_id": str(account["id"]),
+                        "email_address": email_address,
+                        "provider_id": provider_id,
+                        "thread_id": normalized_item["thread_id"] or "",
+                    }
                 )
-
-                if emit_result["status"] == "created":
-                    emitted += 1
-                else:
-                    logger.info(
-                        "Skipped duplicate process:normalized emission "
-                        "normalized_item_id=%s status=%s",
-                        normalized_item["id"],
-                        emit_result.get("status", "unknown"),
-                    )
 
                 # Collect for post-commit extraction
                 normalized_ids.append((str(normalized_item["id"]), str(account["id"])))
@@ -163,6 +154,28 @@ async def process_gmail_push_notification(
             email_address, account["id"], previous_history_id, latest_history_id,
             inserted, skipped, normalized, emitted,
         )
+
+        if settings.app_env != "production" and redis is not None:
+            for publication in pending_publications:
+                emit_result = await publish_normalized_event_once(
+                    redis,
+                    normalized_item_id=publication["normalized_item_id"],
+                    source_item_id=publication["source_item_id"],
+                    account_id=publication["account_id"],
+                    email_address=publication["email_address"],
+                    provider_id=publication["provider_id"],
+                    thread_id=publication["thread_id"],
+                )
+
+                if emit_result["status"] in {"published", "published_no_dedup"}:
+                    emitted += 1
+                else:
+                    logger.info(
+                        "Skipped duplicate process:normalized emission "
+                        "normalized_item_id=%s status=%s",
+                        publication["normalized_item_id"],
+                        emit_result.get("status", "unknown"),
+                    )
 
         # Run inline extraction AFTER commit so data is visible
         if settings.app_env == "production" and normalized_ids:
