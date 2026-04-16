@@ -1,6 +1,12 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_GOOGLE_OAUTH_SCOPE = (
+    "https://www.googleapis.com/auth/gmail.readonly "
+    "https://www.googleapis.com/auth/calendar.readonly "
+    "https://www.googleapis.com/auth/gmail.send"
+)
+
 
 class Settings(BaseSettings):
     app_name: str = "CommitGraph API"
@@ -24,8 +30,7 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
-    google_oauth_scope: str = "https://www.googleapis.com/auth/gmail.readonly"
-    google_oauth_scope: str = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.send"
+    google_oauth_scope: str = DEFAULT_GOOGLE_OAUTH_SCOPE
 
     # --- Microsoft OAuth ---
     ms_client_id: str = ""

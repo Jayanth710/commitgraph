@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -8,6 +9,7 @@ from app.services.gmail_api import GmailApiError
 from app.services.gmail_watch import start_gmail_watch
 
 router = APIRouter(prefix="/gmail/watch", tags=["gmail-watch"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/start")
@@ -38,7 +40,16 @@ async def gmail_watch_start(email_address: str):
         try:
             watch_data = await start_gmail_watch(session, dict(row))
         except GmailApiError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            logger.warning(
+                "Failed to start Gmail watch for email=%s account_id=%s: %s",
+                email_address,
+                account_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=400 if exc.upstream_status_code in {400, 401, 403, 404} else 502,
+                detail=exc.user_message,
+            ) from exc
 
         history_id = watch_data.get("historyId")
         expiration_ms = watch_data.get("expiration")
