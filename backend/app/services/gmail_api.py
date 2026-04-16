@@ -14,7 +14,16 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
 class GmailApiError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        upstream_status_code: int | None = None,
+        user_message: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.upstream_status_code = upstream_status_code
+        self.user_message = user_message or message
 
 
 class GmailHistoryExpiredError(GmailApiError):
@@ -38,7 +47,8 @@ async def _refresh_access_token(db: AsyncSession, account: dict[str, Any]) -> No
     if response.is_error:
         raise GmailApiError(
             f"Failed to refresh Gmail access token for account={account['id']}: "
-            f"{response.status_code} {response.text}"
+            f"{response.status_code} {response.text}",
+            upstream_status_code=response.status_code,
         )
 
     payload = response.json()
@@ -97,7 +107,8 @@ async def gmail_request(
     if response.is_error:
         raise GmailApiError(
             f"Gmail API request failed: {method} {path} -> "
-            f"{response.status_code} {response.text}"
+            f"{response.status_code} {response.text}",
+            upstream_status_code=response.status_code,
         )
 
     return response.json()
