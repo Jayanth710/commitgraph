@@ -98,6 +98,10 @@ def compute_containment(summary_a: str, summary_b: str) -> float:
     return len(intersection) / smaller
 
 
+def compute_overlap_count(summary_a: str, summary_b: str) -> int:
+    return len(_word_set(summary_a) & _word_set(summary_b))
+
+
 async def find_duplicate_commitment(
     db: AsyncSession,
     *,
@@ -105,6 +109,7 @@ async def find_duplicate_commitment(
     target_person_id: str | None,
     direction: str,
     summary: str,
+    normalized_item_id: str | None,
     thread_id: str | None,
     similarity_threshold: float = 0.6,
 ) -> dict[str, Any] | None:
@@ -117,6 +122,43 @@ async def find_duplicate_commitment(
     Returns the matching commitment dict if found, None otherwise.
     """
     
+    # Strategy 0: Same normalized email + same owner/direction.
+    # This is the strongest duplicate signal for "same email, different heading"
+    # cases caused by slightly different LLM summaries from a single message.
+    if normalized_item_id:
+        result = await db.execute(
+            text(
+                """
+                SELECT c.id, c.summary, c.status, c.confidence_score
+                FROM commitments c
+                JOIN evidence_links e ON e.commitment_id = c.id
+                WHERE c.owner_person_id = :owner_person_id
+                  AND c.direction = :direction
+                  AND e.normalized_item_id = :normalized_item_id
+                  AND c.status NOT IN ('abandoned')
+                ORDER BY c.created_at DESC
+                LIMIT 10
+                """
+            ),
+            {
+                "owner_person_id": owner_person_id,
+                "direction": direction,
+                "normalized_item_id": normalized_item_id,
+            },
+        )
+
+        for row in result.mappings().all():
+            sim = compute_similarity(summary, row["summary"])
+            containment = compute_containment(summary, row["summary"])
+            overlap = compute_overlap_count(summary, row["summary"])
+            if sim >= 0.45 or (containment >= 0.8 and overlap >= 3):
+                logger.info(
+                    "Duplicate found (same normalized item): existing=%s similarity=%.2f containment=%.2f overlap=%d "
+                    "existing_summary=%r new_summary=%r",
+                    row["id"], sim, containment, overlap, row["summary"], summary,
+                )
+                return dict(row)
+
     # Strategy 1: Same thread + same owner.
     # This is the strongest signal — same email thread, same person committing.
     if thread_id:

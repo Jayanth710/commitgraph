@@ -20,6 +20,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 
+async def commitment_has_evidence_for_item(
+    db: AsyncSession,
+    *,
+    commitment_id: str,
+    normalized_item_id: str,
+) -> bool:
+    """Return whether this commitment is already linked to the normalized item.
+
+    This prevents the same email from appearing once as Source and again as
+    Follow-up when duplicate Gmail notifications re-trigger extraction.
+    """
+    result = await db.execute(
+        text(
+            """
+            SELECT 1
+            FROM evidence_links
+            WHERE commitment_id = :commitment_id
+              AND normalized_item_id = :normalized_item_id
+            LIMIT 1
+            """
+        ),
+        {
+            "commitment_id": commitment_id,
+            "normalized_item_id": normalized_item_id,
+        },
+    )
+    return result.scalar() is not None
+
+
 async def insert_commitment(
     db: AsyncSession,
     *,
@@ -153,17 +182,31 @@ async def insert_review_queue_item(
     result = await db.execute(
         text(
             """
-            INSERT INTO review_queue (
-                commitment_id,
-                reason,
-                suggested_action
+            WITH existing AS (
+                SELECT id
+                FROM review_queue
+                WHERE commitment_id = :commitment_id
+                  AND status = 'pending'
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+            ),
+            inserted AS (
+                INSERT INTO review_queue (
+                    commitment_id,
+                    reason,
+                    suggested_action
+                )
+                SELECT
+                    :commitment_id,
+                    :reason,
+                    :suggested_action
+                WHERE NOT EXISTS (SELECT 1 FROM existing)
+                RETURNING id
             )
-            VALUES (
-                :commitment_id,
-                :reason,
-                :suggested_action
-            )
-            RETURNING id
+            SELECT id FROM inserted
+            UNION ALL
+            SELECT id FROM existing
+            LIMIT 1
             """
         ),
         {

@@ -21,6 +21,7 @@ services:
       - ./backend/migrations/007_daily_briefs.sql:/docker-entrypoint-initdb.d/007_daily_briefs.sql:ro
       - ./backend/migrations/008_brief_delivery.sql:/docker-entrypoint-initdb.d/008_brief_delivery.sql:ro
       - ./backend/migrations/009_dedupe_evidence_links.sql:/docker-entrypoint-initdb.d/009_dedupe_evidence_links.sql:ro
+      - ./backend/migrations/010_dedupe_review_queue.sql:/docker-entrypoint-initdb.d/010_dedupe_review_queue.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U commitgraph -d commitgraph"]
       interval: 5s
