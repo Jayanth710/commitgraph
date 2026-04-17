@@ -895,7 +895,7 @@ async def get_stats(
         review_result = await db.execute(
             text(
                 f"""
-                SELECT count(*)
+                SELECT count(DISTINCT rq.id)
                 FROM review_queue rq
                 JOIN commitments c ON c.id = rq.commitment_id
                 JOIN evidence_links el ON el.commitment_id = c.id

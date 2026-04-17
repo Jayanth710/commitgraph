@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { useAccountFilter } from "@/components/AccountFilterProvider";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, CheckCircle, AlertTriangle, Clock,
@@ -14,6 +15,7 @@ import {
 export default function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { activeAccountId } = useAccountFilter();
   const [account, setAccount] = useState<any>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [badges, setBadges] = useState<Record<string, number>>({});
@@ -21,9 +23,11 @@ export default function Sidebar() {
 useEffect(() => {
     async function load() {
       try {
+        const params = new URLSearchParams();
+        if (activeAccountId) params.set("account_id", activeAccountId);
         const [accountsData, statsData] = await Promise.all([
           api.getAccounts(),
-          api.getStats(),
+          api.getStats(params.toString()),
         ]);
         const primary = accountsData.accounts?.find((a: any) => a.provider === "gmail") || accountsData.accounts?.[0];
         setAccount(primary);
@@ -40,7 +44,9 @@ useEffect(() => {
 
     const refreshBadges = async () => {
       try {
-        const stats = await api.getStats();
+        const params = new URLSearchParams();
+        if (activeAccountId) params.set("account_id", activeAccountId);
+        const stats = await api.getStats(params.toString());
         setBadges({
           "/": stats.overdue_count || 0,
           "/commitments": stats.open_count || 0,
@@ -59,7 +65,7 @@ useEffect(() => {
       clearInterval(interval);
       window.removeEventListener("commitgraph:refresh", refreshBadges);
     };
-  }, []);
+  }, [activeAccountId]);
 
   useEffect(() => {
     setMobileOpen(false);
