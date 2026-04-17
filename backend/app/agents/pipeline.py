@@ -37,6 +37,7 @@ from langgraph.graph import END, StateGraph
 from app.agents.extraction import extract_commitments
 from app.core.config import get_settings
 from app.services.commitment_store import (
+    commitment_has_evidence_for_item,
     insert_commitment,
     insert_evidence_link,
     insert_review_queue_item,
@@ -225,6 +226,7 @@ async def store_node(state: ExtractionState) -> dict:
                     target_person_id=commitment.get("target_person_id"),
                     direction=commitment["direction"],
                     summary=commitment["summary"],
+                    normalized_item_id=normalized_item_id,
                     thread_id=thread_id,
                 )
 
@@ -233,21 +235,30 @@ async def store_node(state: ExtractionState) -> dict:
                     # Instead, link this email as additional evidence.
                     existing_id = str(existing["id"])
 
-                    await insert_evidence_link(
+                    already_linked = await commitment_has_evidence_for_item(
                         db,
                         commitment_id=existing_id,
                         normalized_item_id=normalized_item_id,
-                        evidence_type="update",
-                        extracted_snippet=commitment.get("raw_text"),
                     )
+                    if not already_linked:
+                        await insert_evidence_link(
+                            db,
+                            commitment_id=existing_id,
+                            normalized_item_id=normalized_item_id,
+                            evidence_type="update",
+                            extracted_snippet=commitment.get("raw_text"),
+                        )
 
                     deduplicated += 1
                     logger.info(
                         "Deduplicated: new summary=%r matched existing=%s summary=%r. "
-                        "Added evidence_link instead of new commitment.",
+                        "%s",
                         commitment["summary"],
                         existing_id,
                         existing["summary"],
+                        "Evidence already linked for normalized item; skipped duplicate link."
+                        if already_linked
+                        else "Added evidence_link instead of new commitment.",
                     )
                     continue
 

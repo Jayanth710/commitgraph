@@ -194,7 +194,6 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
                 """
                 SELECT DISTINCT ON (
                     e.normalized_item_id,
-                    e.evidence_type,
                     COALESCE(e.extracted_snippet, '')
                 )
                     e.id, e.evidence_type, e.extracted_snippet, e.linked_at,
@@ -207,8 +206,12 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
                 WHERE e.commitment_id = :cid
                 ORDER BY
                     e.normalized_item_id,
-                    e.evidence_type,
                     COALESCE(e.extracted_snippet, ''),
+                    CASE
+                        WHEN e.evidence_type = 'origin' THEN 0
+                        WHEN e.evidence_type IN ('update', 'follow_up') THEN 1
+                        ELSE 2
+                    END,
                     e.linked_at ASC
                 """
             ),
@@ -527,25 +530,29 @@ async def list_review_queue(
         result = await db.execute(
             text(
                 f"""
-                SELECT
-                    rq.id, rq.reason, rq.suggested_action, rq.status as review_status,
-                    rq.created_at as review_created_at,
-                    c.id as commitment_id, c.summary, c.raw_text,
-                    c.direction, c.confidence_score, c.due_date,
-                    c.commitment_type,
-                    p_owner.email_addresses[1] as owner_email,
-                    p_target.email_addresses[1] as target_email,
-                    n.subject as source_subject, n.sender_email as source_sender,
-                    n.body_text as source_body
-                FROM review_queue rq
-                JOIN commitments c ON c.id = rq.commitment_id
-                JOIN persons p_owner ON p_owner.id = c.owner_person_id
-                LEFT JOIN persons p_target ON p_target.id = c.target_person_id
-                LEFT JOIN evidence_links e ON e.commitment_id = c.id AND e.evidence_type = 'origin'
-                LEFT JOIN normalized_items n ON n.id = e.normalized_item_id
-                LEFT JOIN accounts a ON a.id = n.account_id
-                {where_clause}
-                ORDER BY rq.created_at DESC
+                SELECT *
+                FROM (
+                    SELECT DISTINCT ON (rq.id)
+                        rq.id, rq.reason, rq.suggested_action, rq.status as review_status,
+                        rq.created_at as review_created_at,
+                        c.id as commitment_id, c.summary, c.raw_text,
+                        c.direction, c.confidence_score, c.due_date,
+                        c.commitment_type,
+                        p_owner.email_addresses[1] as owner_email,
+                        p_target.email_addresses[1] as target_email,
+                        n.subject as source_subject, n.sender_email as source_sender,
+                        n.body_text as source_body
+                    FROM review_queue rq
+                    JOIN commitments c ON c.id = rq.commitment_id
+                    JOIN persons p_owner ON p_owner.id = c.owner_person_id
+                    LEFT JOIN persons p_target ON p_target.id = c.target_person_id
+                    LEFT JOIN evidence_links e ON e.commitment_id = c.id AND e.evidence_type = 'origin'
+                    LEFT JOIN normalized_items n ON n.id = e.normalized_item_id
+                    LEFT JOIN accounts a ON a.id = n.account_id
+                    {where_clause}
+                    ORDER BY rq.id, e.linked_at ASC NULLS LAST
+                ) review_rows
+                ORDER BY review_created_at DESC
                 """
             ),
             params,
