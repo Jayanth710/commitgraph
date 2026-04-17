@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Briefcase, Building2, CalendarDays, Search, Sparkles } from "lucide-react";
+import { Briefcase, Building2, CalendarDays, Search, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "react-toastify";
 
 import { useAccountFilter } from "@/components/AccountFilterProvider";
@@ -27,6 +27,7 @@ export default function ApplicationsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const { activeAccountId } = useAccountFilter();
 
   useEffect(() => {
@@ -66,6 +67,26 @@ export default function ApplicationsPage() {
       toast.error("Failed to update application status.");
     } finally {
       setUpdatingId(null);
+    }
+  }
+
+  async function handleDelete(item: JobApplication) {
+    const label = item.role_title
+      ? `${item.company_name} - ${item.role_title}`
+      : item.company_name;
+    const confirmed = window.confirm(`Delete this job application tracker for ${label}?`);
+    if (!confirmed) return;
+
+    setDeletingId(item.id);
+    try {
+      await api.deleteJobApplication(item.id);
+      setItems((prev) => prev.filter((entry) => entry.id !== item.id));
+      toast.success("Job application deleted.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete job application.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -146,9 +167,22 @@ export default function ApplicationsPage() {
               >
                 <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-lg font-semibold">{item.company_name}</h3>
-                      <StatusBadge status={item.status} />
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-lg font-semibold">{item.company_name}</h3>
+                          <StatusBadge status={item.status} />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(item)}
+                        disabled={deletingId === item.id}
+                        aria-label={`Delete ${item.company_name} application`}
+                        className="shrink-0 rounded-md p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
 
                     <div className="flex items-center gap-2 mt-1 text-sm text-gray-500 dark:text-gray-400">

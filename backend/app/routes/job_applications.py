@@ -230,3 +230,36 @@ async def update_job_application(
             )
 
     return {"job_application": _serialize_row(row)}
+
+
+@router.delete("/job-applications/{job_application_id}")
+async def delete_job_application(
+    job_application_id: str,
+    user: dict = Depends(get_current_user),
+):
+    user_id = str(user["id"])
+
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            result = await db.execute(
+                text(
+                    """
+                    DELETE FROM job_applications
+                    WHERE id = :job_application_id
+                      AND user_id = :user_id
+                    RETURNING id, company_name, role_title
+                    """
+                ),
+                {
+                    "job_application_id": job_application_id,
+                    "user_id": user_id,
+                },
+            )
+            row = result.mappings().first()
+            if not row:
+                raise HTTPException(status_code=404, detail="Job application not found")
+
+    return {
+        "deleted": True,
+        "job_application": _serialize_row(row),
+    }
