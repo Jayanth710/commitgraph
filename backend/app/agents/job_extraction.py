@@ -7,6 +7,7 @@ import re
 
 from app.services.llm import llm_completion
 from app.services.privacy_guardrails import (
+    extract_forwarded_sender,
     sanitize_email_body_for_llm,
     sanitize_email_subject,
 )
@@ -79,7 +80,8 @@ If there is nothing relevant, return {"job_applications": []}.
 The email body you receive may already be privacy-filtered:
 - only the newest relevant message may be included
 - quoted history and signatures may be removed
-- sensitive numbers, addresses, URLs, and tokens may be redacted\
+- sensitive numbers, addresses, URLs, and tokens may be redacted
+- forwarded emails have been unwrapped; treat the visible body as the real message\
 """
 
 JOB_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
@@ -151,6 +153,44 @@ JOB_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
                         "raw_text": "Thank you for applying for the Software Engineer position at Galileo! At this time, the Software Engineer position has been filled.",
                         "date_applied": None,
                         "event_date": "2026-04-14",
+                        "confidence_score": 0.95,
+                    }
+                ]
+            }
+        ),
+    },
+    {
+        "role": "user",
+        "content": json.dumps(
+            {
+                "account_owner_email": "me@gmail.com",
+                "sender_email": "noreply@tesla.com",
+                "sender_name": "Tesla",
+                "subject": "Jayanth Thank you for your interest in Tesla",
+                "body_text": (
+                    "Hello Jayanth,\n\n"
+                    "Thank you for your interest in the Fullstack Software Engineer position at Tesla. "
+                    "After carefully reviewing your application, we have decided not to move forward "
+                    "with your application at this time.\n\n"
+                    "We wish you all the best in your job search."
+                ),
+                "sent_date": "2026-04-12",
+            }
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps(
+            {
+                "job_applications": [
+                    {
+                        "company_name": "Tesla",
+                        "role_title": "Fullstack Software Engineer",
+                        "status": "rejected",
+                        "summary": "Fullstack Software Engineer application was closed at Tesla",
+                        "raw_text": "Thank you for your interest in the Fullstack Software Engineer position at Tesla. We have decided not to move forward with your application at this time.",
+                        "date_applied": None,
+                        "event_date": "2026-04-12",
                         "confidence_score": 0.95,
                     }
                 ]
@@ -245,12 +285,16 @@ JOB_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
     {"role": "assistant", "content": json.dumps({"job_applications": []})},
 ]
 
+# Broadened to match "thanks for applying", "thank you for applying",
+# "applied for/to", and "application for" — all followed by role/position at company.
 _ROLE_AT_COMPANY_RE = re.compile(
-    r"(?:thanks for applying to|applied to|application for)\s+the\s+(?P<role>.+?)\s+role\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
+    r"(?:thanks?(?:\s+you)?\s+for\s+applying\s+(?:for|to)|applied\s+(?:for|to)|application\s+for)"
+    r"\s+the\s+(?P<role>.+?)\s+role\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
     re.IGNORECASE,
 )
 _POSITION_AT_COMPANY_RE = re.compile(
-    r"(?:thanks for applying (?:for|to)|applied (?:for|to)|application for)\s+the\s+(?P<role>.+?)\s+(?:role|position)\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
+    r"(?:thanks?(?:\s+you)?\s+for\s+applying\s+(?:for|to)|applied\s+(?:for|to)|application\s+for)"
+    r"\s+the\s+(?P<role>.+?)\s+(?:role|position)\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
     re.IGNORECASE,
 )
 _INTEREST_IN_POSITION_AT_COMPANY_RE = re.compile(
@@ -261,12 +305,32 @@ _SUBJECT_COMPANY_ROLE_APPLICATION_RE = re.compile(
     r"(?:update on your|regarding your|your)\s+(?P<company>[A-Za-z0-9&.'\- ]+?)\s+(?P<role>[A-Za-z0-9&.'\- ]+?)\s+application(?:[.!?\n]|$)",
     re.IGNORECASE,
 )
+# Last-resort: "<Role Title> at <Company>" or "<Role> role at <Company>" in the
+# subject. Requires a recognizable job-title keyword to avoid matching arbitrary
+# "X at Y" phrases that aren't job roles.
+_SUBJECT_ROLE_AT_COMPANY_RE = re.compile(
+    r"(?P<role>[A-Za-z][A-Za-z0-9&+.'\- ]*?"
+    r"(?:Engineer|Developer|Designer|Manager|Analyst|Scientist|Intern|Internship"
+    r"|Lead|Architect|Consultant|Associate|Specialist|Director|Researcher"
+    r"|Coordinator|Administrator|Strategist|Recruiter|PM|SWE|MLE))"
+    r"\s+(?:role\s+)?at\s+"
+    r"(?P<company>[A-Za-z0-9&.'\-][A-Za-z0-9&.'\- ]*?)"
+    r"(?:\s*[-–—|:]|$|[.!?\n])",
+    re.IGNORECASE,
+)
 _CALL_SIGNAL_RE = re.compile(
     r"(set up a .*?call|schedule (?:a|an) .*?call|share (?:your )?availability|send (?:over )?your availability|45-minute call|30-minute call|screen(?:ing)? call|first-round interview|interview)",
     re.IGNORECASE,
 )
+# Broadened to match the many flavors of rejection phrasing, including
+# "wish you all the best" (Tesla) and "wish you the best of luck in your
+# job search" (Galileo), plus common "we have decided not to move forward" forms.
 _REJECTION_SIGNAL_RE = re.compile(
-    r"(position has been filled|role has been filled|we (?:have )?decided not to move forward|will not be moving forward|not moving forward|wish you the best of luck in your job search|unfortunately,? we|thank you for applying.*position has been filled)",
+    r"(position has been filled|role has been filled"
+    r"|we (?:have )?decided not to move forward|will not be moving forward|not moving forward"
+    r"|wish you (?:the best of luck|all the best)(?: in your (?:job )?search)?"
+    r"|unfortunately,?\s+we"
+    r"|thank you for applying.*position has been filled)",
     re.IGNORECASE,
 )
 
@@ -277,6 +341,7 @@ def _extract_role_company(combined: str) -> tuple[str, str] | None:
         _POSITION_AT_COMPANY_RE,
         _INTEREST_IN_POSITION_AT_COMPANY_RE,
         _SUBJECT_COMPANY_ROLE_APPLICATION_RE,
+        _SUBJECT_ROLE_AT_COMPANY_RE,
     ):
         match = pattern.search(combined)
         if not match:
@@ -445,13 +510,37 @@ async def extract_job_applications(
     body_text: str | None,
     sent_date: str | None,
 ) -> JobApplicationExtractionResponse:
+    # If this email is a forward (common when users forward recruiter emails
+    # from their school/work account to their personal account), the `sender_email`
+    # we receive is the forwarder, not the real recruiter. Recover the original
+    # sender from the forward header so the LLM sees it correctly.
+    original_sender = extract_forwarded_sender(body_text)
+    effective_sender = original_sender or sender_email
+    if original_sender and original_sender != sender_email.lower():
+        logger.info(
+            "Detected forwarded email: using original sender %r instead of %r",
+            original_sender,
+            sender_email,
+        )
+
     email_payload = _build_email_payload(
         account_owner_email=account_owner_email,
-        sender_email=sender_email,
+        sender_email=effective_sender,
         sender_name=sender_name,
         subject=subject,
         body_text=body_text,
         sent_date=sent_date,
+    )
+
+    # Useful debug breadcrumb — if extraction ever misses wholesale again,
+    # this log tells you immediately whether the sanitizer left anything to work with.
+    sanitized_body_preview = sanitize_email_body_for_llm(body_text)
+    logger.debug(
+        "Job extraction invoked: subject=%r sender=%r sanitized_body_len=%d preview=%r",
+        subject,
+        effective_sender,
+        len(sanitized_body_preview),
+        sanitized_body_preview[:200],
     )
 
     messages = [
@@ -503,9 +592,10 @@ async def extract_job_applications(
         return parsed
     except (json.JSONDecodeError, ValueError) as first_error:
         logger.warning(
-            "Job extraction invalid JSON on first attempt (model=%s): %s. Retrying...",
+            "Job extraction invalid JSON on first attempt (model=%s): %s. Raw content preview: %r",
             result.model,
             first_error,
+            result.content[:500],
         )
 
     messages.append({"role": "assistant", "content": result.content})
@@ -553,10 +643,12 @@ async def extract_job_applications(
                 )
                 return heuristic
         return parsed
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as retry_error:
         logger.error(
-            "Job extraction invalid JSON on retry too (model=%s). Returning empty extraction.",
+            "Job extraction invalid JSON on retry too (model=%s): %s. Raw content preview: %r. Returning empty extraction.",
             retry_result.model,
+            retry_error,
+            retry_result.content[:500],
         )
         rejection_heuristic = _heuristic_rejection_fallback(
             subject=subject,
