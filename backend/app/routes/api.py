@@ -193,8 +193,7 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
             text(
                 """
                 SELECT DISTINCT ON (
-                    e.normalized_item_id,
-                    COALESCE(e.extracted_snippet, '')
+                    e.normalized_item_id
                 )
                     e.id, e.evidence_type, e.extracted_snippet, e.linked_at,
                     n.subject, n.sender_email, n.sender_name,
@@ -206,11 +205,11 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
                 WHERE e.commitment_id = :cid
                 ORDER BY
                     e.normalized_item_id,
-                    COALESCE(e.extracted_snippet, ''),
                     CASE
                         WHEN e.evidence_type = 'origin' THEN 0
-                        WHEN e.evidence_type IN ('update', 'follow_up') THEN 1
-                        ELSE 2
+                        WHEN e.evidence_type = 'completion_signal' THEN 1
+                        WHEN e.evidence_type IN ('update', 'follow_up') THEN 2
+                        ELSE 3
                     END,
                     e.linked_at ASC
                 """
