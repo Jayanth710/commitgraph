@@ -54,14 +54,14 @@ litellm.set_verbose = False
 # ---------------------------------------------------------------------------
 ROUTING_TABLE: dict[str, dict[str, Any]] = {
     "commitment_extraction": {
-        "model": "gpt-4o",
+        "model": "gpt-4o-mini",
         # Added anthropic/ prefix here
         "fallbacks": ["anthropic/claude-haiku-4-5-20241022", "gemini/gemini-2.5-flash"],
         "max_tokens": 1024,
         "temperature": 0.1,   
     },
     "job_application_extraction": {
-        "model": "gpt-4o",
+        "model": "gpt-4o-mini",
         "fallbacks": ["anthropic/claude-haiku-4-5-20241022", "gemini/gemini-2.5-flash"],
         "max_tokens": 1024,
         "temperature": 0.1,
