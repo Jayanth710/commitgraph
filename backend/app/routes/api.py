@@ -192,7 +192,11 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
         evidence_result = await db.execute(
             text(
                 """
-                SELECT
+                SELECT DISTINCT ON (
+                    e.normalized_item_id,
+                    e.evidence_type,
+                    COALESCE(e.extracted_snippet, '')
+                )
                     e.id, e.evidence_type, e.extracted_snippet, e.linked_at,
                     n.subject, n.sender_email, n.sender_name,
                     n.item_type, n.sent_at, n.received_at,
@@ -201,12 +205,19 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
                 FROM evidence_links e
                 JOIN normalized_items n ON n.id = e.normalized_item_id
                 WHERE e.commitment_id = :cid
-                ORDER BY e.linked_at ASC
+                ORDER BY
+                    e.normalized_item_id,
+                    e.evidence_type,
+                    COALESCE(e.extracted_snippet, ''),
+                    e.linked_at ASC
                 """
             ),
             {"cid": commitment_id},
         )
         evidence = evidence_result.mappings().all()
+
+        # Re-sort after DISTINCT ON so the UI still shows oldest-first.
+        evidence = sorted(evidence, key=lambda row: row["linked_at"])
 
     return {
         "commitment": _serialize_row(commitment),

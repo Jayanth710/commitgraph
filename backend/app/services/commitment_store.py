@@ -98,19 +98,34 @@ async def insert_evidence_link(
     result = await db.execute(
         text(
             """
-            INSERT INTO evidence_links (
-                commitment_id,
-                normalized_item_id,
-                evidence_type,
-                extracted_snippet
+            WITH existing AS (
+                SELECT id
+                FROM evidence_links
+                WHERE commitment_id = :commitment_id
+                  AND normalized_item_id = :normalized_item_id
+                  AND evidence_type = :evidence_type
+                  AND COALESCE(extracted_snippet, '') = COALESCE(:extracted_snippet, '')
+                LIMIT 1
+            ),
+            inserted AS (
+                INSERT INTO evidence_links (
+                    commitment_id,
+                    normalized_item_id,
+                    evidence_type,
+                    extracted_snippet
+                )
+                SELECT
+                    :commitment_id,
+                    :normalized_item_id,
+                    :evidence_type,
+                    :extracted_snippet
+                WHERE NOT EXISTS (SELECT 1 FROM existing)
+                RETURNING id
             )
-            VALUES (
-                :commitment_id,
-                :normalized_item_id,
-                :evidence_type,
-                :extracted_snippet
-            )
-            RETURNING id
+            SELECT id FROM inserted
+            UNION ALL
+            SELECT id FROM existing
+            LIMIT 1
             """
         ),
         {

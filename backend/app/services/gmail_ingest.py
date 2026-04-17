@@ -76,12 +76,15 @@ async def process_gmail_push_notification(
 
             for message_id in message_ids:
                 idempotency_key = build_idempotency_key(str(account["id"]), message_id)
+                source_already_exists = False
+                should_reextract = True
 
                 existing_source = await _get_source_item_by_idempotency(
                     db, idempotency_key=idempotency_key,
                 )
 
                 if existing_source:
+                    source_already_exists = True
                     skipped += 1
                     source_item_id = str(existing_source["id"])
                     provider_id = str(existing_source["provider_id"])
@@ -109,6 +112,7 @@ async def process_gmail_push_notification(
                         )
                         if fallback_source is None:
                             raise RuntimeError(f"source_item insert lost for message_id={message_id}")
+                        source_already_exists = True
                         skipped += 1
                         source_item_id = str(fallback_source["id"])
                         provider_id = str(fallback_source["provider_id"])
@@ -128,6 +132,9 @@ async def process_gmail_push_notification(
                 if normalized_item is None:
                     raise RuntimeError(f"normalized_item missing for source_item_id={source_item_id}")
 
+                if source_already_exists and normalized_item.get("processing_status") == "processed":
+                    should_reextract = False
+
                 pending_publications.append(
                     {
                         "normalized_item_id": str(normalized_item["id"]),
@@ -140,7 +147,14 @@ async def process_gmail_push_notification(
                 )
 
                 # Collect for post-commit extraction
-                normalized_ids.append((str(normalized_item["id"]), str(account["id"])))
+                if should_reextract:
+                    normalized_ids.append((str(normalized_item["id"]), str(account["id"])))
+                else:
+                    logger.info(
+                        "Skipping re-extraction for already-processed normalized_item=%s provider_id=%s",
+                        normalized_item["id"],
+                        provider_id,
+                    )
 
             await _update_account_history_id(
                 db, account_id=str(account["id"]), history_id=latest_history_id,
@@ -263,7 +277,7 @@ async def _get_normalized_item_by_source_item_id(
     result = await db.execute(
         text(
             """
-            SELECT id, thread_id
+            SELECT id, thread_id, processing_status
             FROM normalized_items
             WHERE source_item_id = :source_item_id
             LIMIT 1
