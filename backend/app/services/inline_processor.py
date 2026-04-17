@@ -7,6 +7,7 @@ function call, without Redis queuing or separate workers.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -80,20 +81,50 @@ async def process_normalized_item_inline(
     }
 
     try:
-        graph_result = await extraction_graph.ainvoke(initial_state)
-        commitments_stored = len(graph_result.get("stored_commitment_ids", []))
-        review_items = graph_result.get("review_items_created", 0)
         from app.services.job_application_processor import process_job_application_item
 
-        job_result = await process_job_application_item(
-            normalized_item_id=normalized_item_id,
-            account_id=account_id,
+        commitment_task = asyncio.create_task(extraction_graph.ainvoke(initial_state))
+        job_task = asyncio.create_task(
+            process_job_application_item(
+                normalized_item_id=normalized_item_id,
+                account_id=account_id,
+            )
         )
+        graph_result, job_result = await asyncio.gather(
+            commitment_task,
+            job_task,
+            return_exceptions=True,
+        )
+
+        task_errors: list[str] = []
+        if isinstance(graph_result, Exception):
+            logger.exception(
+                "Commitment extraction failed for %s",
+                normalized_item_id,
+                exc_info=graph_result,
+            )
+            task_errors.append(f"commitments: {graph_result}")
+            graph_result = {}
+
+        if isinstance(job_result, Exception):
+            logger.exception(
+                "Job application extraction failed for %s",
+                normalized_item_id,
+                exc_info=job_result,
+            )
+            task_errors.append(f"job_applications: {job_result}")
+            job_result = {"status": "error", "applications_detected": 0}
+
+        if task_errors:
+            raise RuntimeError("; ".join(task_errors))
+
+        commitments_stored = len(graph_result.get("stored_commitment_ids", []))
+        review_items = graph_result.get("review_items_created", 0)
 
         review_count = len(review_items) if isinstance(review_items, list) else review_items
 
         logger.info(
-            "Inline extraction for %s: %d commitments, %d review items, %d job application updates",
+            "Inline extraction for %s completed in parallel: %d commitments, %d review items, %d job application updates",
             normalized_item_id, 
             commitments_stored, 
             review_count, 

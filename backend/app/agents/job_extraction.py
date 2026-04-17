@@ -125,6 +125,43 @@ JOB_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
         "content": json.dumps(
             {
                 "account_owner_email": "me@gmail.com",
+                "sender_email": "acalcagno@technisys.com",
+                "sender_name": "Agustina Calcagno",
+                "subject": "Jayanth, an update on your Galileo Software Engineer application",
+                "body_text": (
+                    "Hi Jayanth,\n\n"
+                    "Thank you for applying for the Software Engineer position at Galileo!\n\n"
+                    "At this time, the Software Engineer position has been filled.\n\n"
+                    "We wish you the best of luck in your job search!"
+                ),
+                "sent_date": "2026-04-14",
+            }
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps(
+            {
+                "job_applications": [
+                    {
+                        "company_name": "Galileo",
+                        "role_title": "Software Engineer",
+                        "status": "rejected",
+                        "summary": "Software Engineer application was closed at Galileo",
+                        "raw_text": "Thank you for applying for the Software Engineer position at Galileo! At this time, the Software Engineer position has been filled.",
+                        "date_applied": None,
+                        "event_date": "2026-04-14",
+                        "confidence_score": 0.95,
+                    }
+                ]
+            }
+        ),
+    },
+    {
+        "role": "user",
+        "content": json.dumps(
+            {
+                "account_owner_email": "me@gmail.com",
                 "sender_email": "recruiting@deltavcapital.com",
                 "sender_name": "Kirk",
                 "subject": "AI Engineer role at Delta-v",
@@ -212,10 +249,38 @@ _ROLE_AT_COMPANY_RE = re.compile(
     r"(?:thanks for applying to|applied to|application for)\s+the\s+(?P<role>.+?)\s+role\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
     re.IGNORECASE,
 )
+_POSITION_AT_COMPANY_RE = re.compile(
+    r"(?:thanks for applying (?:for|to)|applied (?:for|to)|application for)\s+the\s+(?P<role>.+?)\s+(?:role|position)\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
+    re.IGNORECASE,
+)
+_SUBJECT_COMPANY_ROLE_APPLICATION_RE = re.compile(
+    r"(?:update on your|regarding your|your)\s+(?P<company>[A-Za-z0-9&.'\- ]+?)\s+(?P<role>[A-Za-z0-9&.'\- ]+?)\s+application(?:[.!?\n]|$)",
+    re.IGNORECASE,
+)
 _CALL_SIGNAL_RE = re.compile(
     r"(set up a .*?call|schedule (?:a|an) .*?call|share (?:your )?availability|send (?:over )?your availability|45-minute call|30-minute call|screen(?:ing)? call|first-round interview|interview)",
     re.IGNORECASE,
 )
+_REJECTION_SIGNAL_RE = re.compile(
+    r"(position has been filled|role has been filled|we (?:have )?decided not to move forward|will not be moving forward|not moving forward|wish you the best of luck in your job search|unfortunately,? we|thank you for applying.*position has been filled)",
+    re.IGNORECASE,
+)
+
+
+def _extract_role_company(combined: str) -> tuple[str, str] | None:
+    for pattern in (
+        _ROLE_AT_COMPANY_RE,
+        _POSITION_AT_COMPANY_RE,
+        _SUBJECT_COMPANY_ROLE_APPLICATION_RE,
+    ):
+        match = pattern.search(combined)
+        if not match:
+            continue
+        role_title = match.group("role").strip(" .,:;")
+        company_name = match.group("company").strip(" .,:;")
+        if role_title and company_name:
+            return role_title, company_name
+    return None
 
 
 def _heuristic_recruiter_screen_fallback(
@@ -230,14 +295,11 @@ def _heuristic_recruiter_screen_fallback(
     if not combined:
         return None
 
-    match = _ROLE_AT_COMPANY_RE.search(combined)
-    if not match or not _CALL_SIGNAL_RE.search(combined):
+    role_company = _extract_role_company(combined)
+    if not role_company or not _CALL_SIGNAL_RE.search(combined):
         return None
 
-    role_title = match.group("role").strip(" .,:;")
-    company_name = match.group("company").strip(" .,:;")
-    if not role_title or not company_name:
-        return None
+    role_title, company_name = role_company
 
     event_date = None
     if sent_date:
@@ -270,6 +332,68 @@ def _heuristic_recruiter_screen_fallback(
                 date_applied=None,
                 event_date=event_date,
                 confidence_score=0.9,
+            )
+        ]
+    )
+
+
+def _heuristic_rejection_fallback(
+    *,
+    subject: str | None,
+    body_text: str | None,
+    sent_date: str | None,
+) -> JobApplicationExtractionResponse | None:
+    sanitized_subject = sanitize_email_subject(subject)
+    sanitized_body = sanitize_email_body_for_llm(body_text)
+    combined = f"{sanitized_subject}\n{sanitized_body}".strip()
+    if not combined or not _REJECTION_SIGNAL_RE.search(combined):
+        return None
+
+    role_company = _extract_role_company(combined)
+    if not role_company:
+        return None
+
+    role_title, company_name = role_company
+
+    event_date = None
+    if sent_date:
+        try:
+            event_date = date.fromisoformat(sent_date)
+        except ValueError:
+            event_date = None
+
+    raw_text_parts: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", sanitized_body):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if (
+            re.search(rf"\b{re.escape(company_name)}\b", sentence, re.IGNORECASE)
+            or re.search(rf"\b{re.escape(role_title)}\b", sentence, re.IGNORECASE)
+            or _REJECTION_SIGNAL_RE.search(sentence)
+        ):
+            raw_text_parts.append(sentence)
+        if len(raw_text_parts) >= 2:
+            break
+
+    raw_text = " ".join(raw_text_parts).strip()
+    if not raw_text:
+        raw_text = (
+            f"Thank you for applying for the {role_title} position at {company_name}. "
+            f"At this time, the {role_title} position has been filled."
+        )
+
+    return JobApplicationExtractionResponse(
+        job_applications=[
+            ExtractedJobApplication(
+                company_name=company_name,
+                role_title=role_title,
+                status="rejected",
+                summary=f"{role_title} application was closed at {company_name}",
+                raw_text=raw_text,
+                date_applied=None,
+                event_date=event_date,
+                confidence_score=0.92,
             )
         ]
     )
@@ -347,6 +471,18 @@ async def extract_job_applications(
             result.cost_usd,
         )
         if not parsed.job_applications:
+            rejection_heuristic = _heuristic_rejection_fallback(
+                subject=subject,
+                body_text=body_text,
+                sent_date=sent_date,
+            )
+            if rejection_heuristic:
+                logger.info(
+                    "Heuristic rejection fallback produced %d job application update(s) for subject=%r",
+                    len(rejection_heuristic.job_applications),
+                    subject,
+                )
+                return rejection_heuristic
             heuristic = _heuristic_recruiter_screen_fallback(
                 subject=subject,
                 body_text=body_text,
@@ -387,6 +523,18 @@ async def extract_job_applications(
     try:
         parsed = _parse_job_extraction_response(retry_result.content)
         if not parsed.job_applications:
+            rejection_heuristic = _heuristic_rejection_fallback(
+                subject=subject,
+                body_text=body_text,
+                sent_date=sent_date,
+            )
+            if rejection_heuristic:
+                logger.info(
+                    "Heuristic rejection fallback produced %d job application update(s) after retry for subject=%r",
+                    len(rejection_heuristic.job_applications),
+                    subject,
+                )
+                return rejection_heuristic
             heuristic = _heuristic_recruiter_screen_fallback(
                 subject=subject,
                 body_text=body_text,
@@ -405,6 +553,13 @@ async def extract_job_applications(
             "Job extraction invalid JSON on retry too (model=%s). Returning empty extraction.",
             retry_result.model,
         )
+        rejection_heuristic = _heuristic_rejection_fallback(
+            subject=subject,
+            body_text=body_text,
+            sent_date=sent_date,
+        )
+        if rejection_heuristic:
+            return rejection_heuristic
         heuristic = _heuristic_recruiter_screen_fallback(
             subject=subject,
             body_text=body_text,

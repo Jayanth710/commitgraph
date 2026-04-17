@@ -67,6 +67,38 @@ async def process_gmail_push_notification(
                     "history_id": latest_history_id,
                 }
 
+            try:
+                previous_history_int = int(previous_history_id)
+                latest_history_int = int(latest_history_id)
+            except (TypeError, ValueError):
+                previous_history_int = None
+                latest_history_int = None
+
+            if (
+                previous_history_int is not None
+                and latest_history_int is not None
+                and latest_history_int <= previous_history_int
+            ):
+                logger.info(
+                    "Ignoring stale Gmail notification email=%s account_id=%s previous_history_id=%s latest_history_id=%s",
+                    email_address,
+                    account["id"],
+                    previous_history_id,
+                    latest_history_id,
+                )
+                return {
+                    "status": "ignored",
+                    "reason": "stale_history_id",
+                    "account_id": str(account["id"]),
+                    "email_address": email_address,
+                    "previous_history_id": previous_history_id,
+                    "latest_history_id": latest_history_id,
+                    "inserted": 0,
+                    "skipped": 0,
+                    "normalized": 0,
+                    "emitted": 0,
+                }
+
             message_ids = await list_new_message_ids(db, account, previous_history_id)
 
             inserted = 0
