@@ -253,6 +253,10 @@ _POSITION_AT_COMPANY_RE = re.compile(
     r"(?:thanks for applying (?:for|to)|applied (?:for|to)|application for)\s+the\s+(?P<role>.+?)\s+(?:role|position)\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
     re.IGNORECASE,
 )
+_INTEREST_IN_POSITION_AT_COMPANY_RE = re.compile(
+    r"(?:thank you for your interest in|thanks for your interest in)\s+the\s+(?P<role>.+?)\s+(?:role|position)\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
+    re.IGNORECASE,
+)
 _SUBJECT_COMPANY_ROLE_APPLICATION_RE = re.compile(
     r"(?:update on your|regarding your|your)\s+(?P<company>[A-Za-z0-9&.'\- ]+?)\s+(?P<role>[A-Za-z0-9&.'\- ]+?)\s+application(?:[.!?\n]|$)",
     re.IGNORECASE,
@@ -271,6 +275,7 @@ def _extract_role_company(combined: str) -> tuple[str, str] | None:
     for pattern in (
         _ROLE_AT_COMPANY_RE,
         _POSITION_AT_COMPANY_RE,
+        _INTEREST_IN_POSITION_AT_COMPANY_RE,
         _SUBJECT_COMPANY_ROLE_APPLICATION_RE,
     ):
         match = pattern.search(combined)
