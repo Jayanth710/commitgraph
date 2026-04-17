@@ -29,7 +29,7 @@ async def list_job_applications(
     account_id: str | None = Query(default=None),
 ):
     user_id = str(user["id"])
-    conditions = ["ja.user_id = :user_id"]
+    conditions = ["ja.user_id = :user_id", "ja.deleted_at IS NULL"]
     params: dict[str, Any] = {"user_id": user_id}
 
     if status:
@@ -117,6 +117,7 @@ async def get_job_application(
                 LEFT JOIN accounts a ON a.id = ja.account_id
                 WHERE ja.id = :job_application_id
                   AND ja.user_id = :user_id
+                  AND ja.deleted_at IS NULL
                 LIMIT 1
                 """
             ),
@@ -179,6 +180,7 @@ async def update_job_application(
                         updated_at = now()
                     WHERE id = :job_application_id
                       AND user_id = :user_id
+                      AND deleted_at IS NULL
                     RETURNING
                         id,
                         company_name,
@@ -244,9 +246,12 @@ async def delete_job_application(
             result = await db.execute(
                 text(
                     """
-                    DELETE FROM job_applications
+                    UPDATE job_applications
+                    SET deleted_at = now(),
+                        updated_at = now()
                     WHERE id = :job_application_id
                       AND user_id = :user_id
+                      AND deleted_at IS NULL
                     RETURNING id, company_name, role_title
                     """
                 ),

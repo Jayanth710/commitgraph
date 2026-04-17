@@ -28,6 +28,7 @@ export default function ApplicationsPage() {
   const [query, setQuery] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDeleteItem, setPendingDeleteItem] = useState<JobApplication | null>(null);
   const { activeAccountId } = useAccountFilter();
 
   useEffect(() => {
@@ -71,17 +72,12 @@ export default function ApplicationsPage() {
   }
 
   async function handleDelete(item: JobApplication) {
-    const label = item.role_title
-      ? `${item.company_name} - ${item.role_title}`
-      : item.company_name;
-    const confirmed = window.confirm(`Delete this job application tracker for ${label}?`);
-    if (!confirmed) return;
-
     setDeletingId(item.id);
     try {
       await api.deleteJobApplication(item.id);
       setItems((prev) => prev.filter((entry) => entry.id !== item.id));
       toast.success("Job application deleted.");
+      setPendingDeleteItem(null);
     } catch (err) {
       console.error(err);
       toast.error("Failed to delete job application.");
@@ -176,7 +172,7 @@ export default function ApplicationsPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleDelete(item)}
+                        onClick={() => setPendingDeleteItem(item)}
                         disabled={deletingId === item.id}
                         aria-label={`Delete ${item.company_name} application`}
                         className="shrink-0 rounded-md p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -236,6 +232,17 @@ export default function ApplicationsPage() {
             ))}
           </div>
         )}
+
+        {pendingDeleteItem && (
+          <DeleteApplicationModal
+            item={pendingDeleteItem}
+            deleting={deletingId === pendingDeleteItem.id}
+            onCancel={() => {
+              if (!deletingId) setPendingDeleteItem(null);
+            }}
+            onConfirm={() => handleDelete(pendingDeleteItem)}
+          />
+        )}
       </>
     </PageTransition>
   );
@@ -285,4 +292,56 @@ function formatStatus(status: string) {
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString();
+}
+
+function DeleteApplicationModal({
+  item,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  item: JobApplication;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const label = item.role_title
+    ? `${item.role_title} at ${item.company_name}`
+    : item.company_name;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-xl rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
+        <h3 className="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-50">
+          Delete application?
+        </h3>
+        <p className="mt-4 text-lg text-gray-600 dark:text-gray-300">
+          This will permanently remove the job tracker for{" "}
+          <span className="font-semibold text-gray-900 dark:text-gray-50">
+            {label}
+          </span>
+          .
+        </p>
+
+        <div className="mt-8 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={deleting}
+            className="rounded-2xl border border-gray-300 px-6 py-3 text-base font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={deleting}
+            className="rounded-2xl bg-red-600 px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleting ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
