@@ -281,7 +281,7 @@ function CommitmentsContent() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search commitments..."
+              placeholder="Search commitments or email subjects..."
               className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
             />
             {searchQuery && (
@@ -556,11 +556,22 @@ function CommitmentCard({
           <p className={`font-medium ${isTerminal ? "line-through" : ""}`}>
             {c.summary}
           </p>
+          {c.source_subject && (
+            <div className="mt-1.5 flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300 min-w-0">
+              <Mail size={13} className="shrink-0 text-gray-400 dark:text-gray-500" />
+              <span className="truncate font-medium">{c.source_subject}</span>
+            </div>
+          )}
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {c.owner_is_self
               ? `You → ${c.target_email || "general"}`
               : `${c.owner_email} → You`}
           </p>
+          {c.source_sender && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+              Source: {c.source_sender}
+            </p>
+          )}
           {c.account_email && (
             <div className="mt-2">
               <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-[11px] text-gray-500 dark:text-gray-400">

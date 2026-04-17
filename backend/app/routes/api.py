@@ -62,6 +62,32 @@ async def list_commitments(
                         ORDER BY el2.linked_at ASC
                         LIMIT 1
                     ) as account_email,
+                    (
+                        SELECT ni2.subject
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY
+                            CASE
+                                WHEN el2.evidence_type = 'origin' THEN 0
+                                ELSE 1
+                            END,
+                            el2.linked_at ASC
+                        LIMIT 1
+                    ) as source_subject,
+                    (
+                        SELECT COALESCE(ni2.sender_name, ni2.sender_email)
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY
+                            CASE
+                                WHEN el2.evidence_type = 'origin' THEN 0
+                                ELSE 1
+                            END,
+                            el2.linked_at ASC
+                        LIMIT 1
+                    ) as source_sender,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,
@@ -168,6 +194,32 @@ async def get_commitment(commitment_id: str, user: dict = Depends(get_current_us
                         ORDER BY el2.linked_at ASC
                         LIMIT 1
                     ) as account_email,
+                    (
+                        SELECT ni2.subject
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY
+                            CASE
+                                WHEN el2.evidence_type = 'origin' THEN 0
+                                ELSE 1
+                            END,
+                            el2.linked_at ASC
+                        LIMIT 1
+                    ) as source_subject,
+                    (
+                        SELECT COALESCE(ni2.sender_name, ni2.sender_email)
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY
+                            CASE
+                                WHEN el2.evidence_type = 'origin' THEN 0
+                                ELSE 1
+                            END,
+                            el2.linked_at ASC
+                        LIMIT 1
+                    ) as source_sender,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,
@@ -455,6 +507,7 @@ async def search_commitments(
                 OR COALESCE(p_target.display_name, '') ILIKE :q
                 OR COALESCE(p_target.email_addresses[1], '') ILIKE :q
                 OR COALESCE(a.email_address, '') ILIKE :q
+                OR COALESCE(ni.subject, '') ILIKE :q
             )
             """
         )
@@ -488,6 +541,32 @@ async def search_commitments(
                         ORDER BY el2.linked_at ASC
                         LIMIT 1
                     ) as account_email,
+                    (
+                        SELECT ni2.subject
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY
+                            CASE
+                                WHEN el2.evidence_type = 'origin' THEN 0
+                                ELSE 1
+                            END,
+                            el2.linked_at ASC
+                        LIMIT 1
+                    ) as source_subject,
+                    (
+                        SELECT COALESCE(ni2.sender_name, ni2.sender_email)
+                        FROM evidence_links el2
+                        JOIN normalized_items ni2 ON ni2.id = el2.normalized_item_id
+                        WHERE el2.commitment_id = c.id
+                        ORDER BY
+                            CASE
+                                WHEN el2.evidence_type = 'origin' THEN 0
+                                ELSE 1
+                            END,
+                            el2.linked_at ASC
+                        LIMIT 1
+                    ) as source_sender,
                     p_owner.display_name as owner_name,
                     p_owner.email_addresses[1] as owner_email,
                     p_owner.is_self as owner_is_self,

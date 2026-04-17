@@ -30,6 +30,8 @@ export type Commitment = {
   target_name?: string | null;
   target_email?: string | null;
   account_email?: string | null;
+  source_subject?: string | null;
+  source_sender?: string | null;
 };
 
 export type EvidenceItem = {

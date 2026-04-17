@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { PageSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
-import { CheckCircle, Pencil, Merge } from "lucide-react";
+import { CheckCircle, Pencil, Merge, Mail } from "lucide-react";
 import PageTransition from "@/components/PageTransition";
 import type { ReviewItem } from "@/lib/types";
 import { useAccountFilter } from "@/components/AccountFilterProvider";
@@ -144,9 +144,18 @@ function ReviewCard({
 
       {item.source_subject && (
         <div className="bg-gray-50 dark:bg-gray-800 rounded-md p-3 mb-3 text-sm">
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
-            From: {item.source_sender} · {item.source_subject}
+          <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">
+            <Mail size={12} />
+            <span>Source email</span>
+          </div>
+          <p className="font-medium text-gray-800 dark:text-gray-100 mb-1">
+            {item.source_subject}
           </p>
+          {item.source_sender && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+              From: {item.source_sender}
+            </p>
+          )}
           <p className="text-gray-600 dark:text-gray-300 line-clamp-3">{item.raw_text}</p>
         </div>
       )}
@@ -297,7 +306,14 @@ function MergeReviewModal({
 }) {
   const { activeAccountId } = useAccountFilter();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Array<{ id: string; summary: string }>>([]);
+  const [results, setResults] = useState<
+    Array<{
+      id: string;
+      summary: string;
+      source_subject?: string | null;
+      source_sender?: string | null;
+    }>
+  >([]);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -311,12 +327,16 @@ function MergeReviewModal({
       });
       if (activeAccountId) params.set("account_id", activeAccountId);
       const data = await api.searchCommitments(params.toString());
+      const filtered = data.commitments.filter((c) => c.id !== item.commitment_id);
       setResults(
-        data.commitments
-          .filter((c) => c.id !== item.commitment_id)
-          .map((c) => ({ id: c.id, summary: c.summary })),
+        filtered.map((c) => ({
+          id: c.id,
+          summary: c.summary,
+          source_subject: c.source_subject,
+          source_sender: c.source_sender,
+        })),
       );
-      if (!data.commitments.length) {
+      if (!filtered.length) {
         setSelectedId("");
       }
     } catch (err) {
@@ -346,7 +366,7 @@ function MergeReviewModal({
                 search();
               }
             }}
-            placeholder="Search target commitment"
+            placeholder="Search by commitment or email subject"
             className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
           />
           <button
@@ -366,7 +386,7 @@ function MergeReviewModal({
             {results.map((r) => (
               <label
                 key={r.id}
-                className="flex items-center gap-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700"
+                className="flex items-start gap-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700"
               >
                 <input
                   type="radio"
@@ -374,8 +394,23 @@ function MergeReviewModal({
                   value={r.id}
                   checked={selectedId === r.id}
                   onChange={() => setSelectedId(r.id)}
+                  className="mt-0.5"
                 />
-                <span className="text-sm">{r.summary}</span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {r.summary}
+                  </p>
+                  {r.source_subject && (
+                    <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                      Source email: {r.source_subject}
+                    </p>
+                  )}
+                  {r.source_sender && (
+                    <p className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
+                      {r.source_sender}
+                    </p>
+                  )}
+                </div>
               </label>
             ))}
           </div>
