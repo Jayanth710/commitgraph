@@ -13,7 +13,7 @@ import type {
 const client = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
   headers: { "Content-Type": "application/json" },
-  timeout: 10000,
+  timeout: 30000,
 });
 
 client.interceptors.request.use((config) => {
