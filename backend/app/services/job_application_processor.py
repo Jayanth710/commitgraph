@@ -80,6 +80,14 @@ async def process_job_application_item(
                     event_date=item.event_date.isoformat() if item.event_date else None,
                     confidence_score=item.confidence_score,
                 )
+                if stored.get("status") == "skipped_deleted":
+                    logger.info(
+                        "Skipped recreating deleted job application for normalized_item=%s company=%s role=%s",
+                        normalized_item_id,
+                        item.company_name,
+                        item.role_title,
+                    )
+                    continue
                 stored_ids.append(str(stored["id"]))
 
     logger.info(
