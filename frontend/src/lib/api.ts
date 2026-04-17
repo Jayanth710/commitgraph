@@ -97,6 +97,8 @@ export const api = {
     client.get(`/api/job-applications/${id}`).then((r) => r.data),
   updateJobApplication: (id: string, body: Record<string, unknown>) =>
     client.patch(`/api/job-applications/${id}`, body).then((r) => r.data),
+  deleteJobApplication: (id: string) =>
+    client.delete(`/api/job-applications/${id}`).then((r) => r.data),
   
   sendEmail: (body: { to: string; subject: string; body: string; thread_id?: string; in_reply_to?: string; account_email: string }) =>
     client.post("/api/email/send", body).then((r) => r.data),
