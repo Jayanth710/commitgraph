@@ -42,6 +42,7 @@ that someone made to do something. Return them as structured JSON.
 - "I'll get back to you on Monday with the numbers" → follow_up, high confidence
 - "Can you review this by end of week?" → review (inbound from the recipient's perspective), high confidence
 - "Let me check with the team and circle back" → follow_up, medium confidence
+- "Please send over your availability for the next three business days" → response_needed, high confidence
 
 ## What is NOT a commitment:
 - "Thanks for the update!" → social pleasantry, NOT a commitment
@@ -68,6 +69,7 @@ Rules:
 - If the email says "I will..." and the sender is NOT the account owner, direction = "inbound"
 - If the email tells the account owner to do something ("you need to...", "please send...", "can you review..."), direction = "outbound"
 - If the email tells someone else to do something and that someone is not the account owner, direction = "inbound"
+- Requests to the account owner to share interview availability or schedule a call are real outbound commitments if the requested action is explicit.
 
 Also set:
 - owner_email = the person who must do the action
@@ -267,6 +269,43 @@ FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
                 ]
             }),
         },
+    # Example: recruiter asks the account owner to send availability
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "me@gmail.com",
+            "sender_email": "recruiting@deltavcapital.com",
+            "sender_name": "Kirk",
+            "recipients": [{"email": "me@gmail.com", "name": "Me", "type": "to"}],
+            "subject": "AI Engineer role at Delta-v",
+            "body_text": (
+                "Hi,\n\n"
+                "Thanks for applying to the AI Engineer role at Delta-v. "
+                "We'd love to set up a 45-minute call to learn more about you.\n\n"
+                "Please send over your availability for the next three business days. "
+                "I look forward to chatting live.\n"
+            ),
+            "sent_date": "2026-04-17",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({
+            "commitments": [
+                {
+                    "summary": "Send availability for a 45-minute call with Delta-v",
+                    "raw_text": "Please send over your availability for the next three business days.",
+                    "commitment_type": "response_needed",
+                    "owner_email": "me@gmail.com",
+                    "target_email": "recruiting@deltavcapital.com",
+                    "direction": "outbound",
+                    "due_date": None,
+                    "due_date_confidence": 0.0,
+                    "confidence_score": 0.91,
+                }
+            ]
+        }),
+    },
 ]
 
 
