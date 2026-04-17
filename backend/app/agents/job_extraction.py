@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from datetime import date
 import json
 import logging
+import re
 
 from app.services.llm import llm_completion
 from app.services.privacy_guardrails import (
     sanitize_email_body_for_llm,
     sanitize_email_subject,
 )
-from app.services.schemas import JobApplicationExtractionResponse
+from app.services.schemas import ExtractedJobApplication, JobApplicationExtractionResponse
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,9 @@ Statuses:
 - offer
 - withdrawn
 - closed
+
+Interpret recruiter screens / intro calls / scheduling calls after an application
+as "interview" stage updates, even if the word "interview" is not explicitly used.
 
 Rules:
 - company_name should be the employer or hiring organization
@@ -120,6 +125,43 @@ JOB_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
         "content": json.dumps(
             {
                 "account_owner_email": "me@gmail.com",
+                "sender_email": "recruiting@deltavcapital.com",
+                "sender_name": "Kirk",
+                "subject": "AI Engineer role at Delta-v",
+                "body_text": (
+                    "Hi Jayanth,\n\n"
+                    "Thanks for applying to the AI Engineer role at Delta-v. "
+                    "We'd love to set up a 45-minute call to learn more about you.\n\n"
+                    "Please send over your availability for the next three business days.\n"
+                ),
+                "sent_date": "2026-04-17",
+            }
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps(
+            {
+                "job_applications": [
+                    {
+                        "company_name": "Delta-v",
+                        "role_title": "AI Engineer",
+                        "status": "interview",
+                        "summary": "Recruiter screen requested for AI Engineer at Delta-v",
+                        "raw_text": "Thanks for applying to the AI Engineer role at Delta-v. We'd love to set up a 45-minute call to learn more about you. Please send over your availability for the next three business days.",
+                        "date_applied": None,
+                        "event_date": "2026-04-17",
+                        "confidence_score": 0.95,
+                    }
+                ]
+            }
+        ),
+    },
+    {
+        "role": "user",
+        "content": json.dumps(
+            {
+                "account_owner_email": "me@gmail.com",
                 "sender_email": "recruiting@databricks.com",
                 "sender_name": "Databricks Recruiting",
                 "subject": "Interview Invitation",
@@ -165,6 +207,72 @@ JOB_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
     },
     {"role": "assistant", "content": json.dumps({"job_applications": []})},
 ]
+
+_ROLE_AT_COMPANY_RE = re.compile(
+    r"(?:thanks for applying to|applied to|application for)\s+the\s+(?P<role>.+?)\s+role\s+at\s+(?P<company>.+?)(?:[.!?\n]|$)",
+    re.IGNORECASE,
+)
+_CALL_SIGNAL_RE = re.compile(
+    r"(set up a .*?call|schedule (?:a|an) .*?call|share (?:your )?availability|send (?:over )?your availability|45-minute call|30-minute call|screen(?:ing)? call|first-round interview|interview)",
+    re.IGNORECASE,
+)
+
+
+def _heuristic_recruiter_screen_fallback(
+    *,
+    subject: str | None,
+    body_text: str | None,
+    sent_date: str | None,
+) -> JobApplicationExtractionResponse | None:
+    sanitized_subject = sanitize_email_subject(subject)
+    sanitized_body = sanitize_email_body_for_llm(body_text)
+    combined = f"{sanitized_subject}\n{sanitized_body}".strip()
+    if not combined:
+        return None
+
+    match = _ROLE_AT_COMPANY_RE.search(combined)
+    if not match or not _CALL_SIGNAL_RE.search(combined):
+        return None
+
+    role_title = match.group("role").strip(" .,:;")
+    company_name = match.group("company").strip(" .,:;")
+    if not role_title or not company_name:
+        return None
+
+    event_date = None
+    if sent_date:
+        try:
+            event_date = date.fromisoformat(sent_date)
+        except ValueError:
+            event_date = None
+
+    summary = f"Recruiter screen requested for {role_title} at {company_name}"
+    raw_text = " ".join(
+        part.strip()
+        for part in [
+            "Thanks for applying to the "
+            f"{role_title} role at {company_name}.",
+            "Please send over your availability for the next three business days."
+            if re.search(r"availability", combined, re.IGNORECASE)
+            else "A call was requested to learn more about you.",
+        ]
+        if part
+    )
+
+    return JobApplicationExtractionResponse(
+        job_applications=[
+            ExtractedJobApplication(
+                company_name=company_name,
+                role_title=role_title,
+                status="interview",
+                summary=summary,
+                raw_text=raw_text,
+                date_applied=None,
+                event_date=event_date,
+                confidence_score=0.9,
+            )
+        ]
+    )
 
 
 def _build_email_payload(
@@ -238,6 +346,19 @@ async def extract_job_applications(
             result.model,
             result.cost_usd,
         )
+        if not parsed.job_applications:
+            heuristic = _heuristic_recruiter_screen_fallback(
+                subject=subject,
+                body_text=body_text,
+                sent_date=sent_date,
+            )
+            if heuristic:
+                logger.info(
+                    "Heuristic recruiter-screen fallback produced %d job application update(s) for subject=%r",
+                    len(heuristic.job_applications),
+                    subject,
+                )
+                return heuristic
         return parsed
     except (json.JSONDecodeError, ValueError) as first_error:
         logger.warning(
@@ -264,10 +385,29 @@ async def extract_job_applications(
     )
 
     try:
-        return _parse_job_extraction_response(retry_result.content)
+        parsed = _parse_job_extraction_response(retry_result.content)
+        if not parsed.job_applications:
+            heuristic = _heuristic_recruiter_screen_fallback(
+                subject=subject,
+                body_text=body_text,
+                sent_date=sent_date,
+            )
+            if heuristic:
+                logger.info(
+                    "Heuristic recruiter-screen fallback produced %d job application update(s) after retry for subject=%r",
+                    len(heuristic.job_applications),
+                    subject,
+                )
+                return heuristic
+        return parsed
     except (json.JSONDecodeError, ValueError):
         logger.error(
             "Job extraction invalid JSON on retry too (model=%s). Returning empty extraction.",
             retry_result.model,
         )
-        return JobApplicationExtractionResponse(job_applications=[])
+        heuristic = _heuristic_recruiter_screen_fallback(
+            subject=subject,
+            body_text=body_text,
+            sent_date=sent_date,
+        )
+        return heuristic or JobApplicationExtractionResponse(job_applications=[])
