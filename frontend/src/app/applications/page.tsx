@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Briefcase, Building2, CalendarDays, Search, Sparkles, Trash2 } from "lucide-react";
+import {
+  Briefcase,
+  Building2,
+  CalendarDays,
+  Search,
+  Sparkles,
+  Trash2,
+  XCircle,
+} from "lucide-react";
 import { toast } from "react-toastify";
 
 import { useAccountFilter } from "@/components/AccountFilterProvider";
@@ -86,10 +94,9 @@ export default function ApplicationsPage() {
     }
   }
 
-  const activeCount = items.filter((item) =>
-    ["applied", "assessment", "interview"].includes(item.status),
-  ).length;
+  const appliedCount = items.filter((item) => item.status === "applied").length;
   const interviewCount = items.filter((item) => item.status === "interview").length;
+  const rejectedCount = items.filter((item) => item.status === "rejected").length;
 
   return (
     <PageTransition>
@@ -101,7 +108,7 @@ export default function ApplicationsPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
           <StatCard
             icon={<Briefcase size={16} className="text-blue-500" />}
             label="Tracked applications"
@@ -109,13 +116,18 @@ export default function ApplicationsPage() {
           />
           <StatCard
             icon={<Sparkles size={16} className="text-amber-500" />}
-            label="Active pipeline"
-            value={activeCount}
+            label="Applied"
+            value={appliedCount}
           />
           <StatCard
             icon={<CalendarDays size={16} className="text-green-500" />}
             label="Interviews"
             value={interviewCount}
+          />
+          <StatCard
+            icon={<XCircle size={16} className="text-red-500" />}
+            label="Rejected"
+            value={rejectedCount}
           />
         </div>
 
