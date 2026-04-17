@@ -432,7 +432,19 @@ async def search_commitments(
     params: dict[str, Any] = {"user_id": user_id, "limit": limit}
 
     if q:
-        conditions.append("(c.summary ILIKE :q OR c.raw_text ILIKE :q)")
+        conditions.append(
+            """
+            (
+                c.summary ILIKE :q
+                OR c.raw_text ILIKE :q
+                OR COALESCE(p_owner.display_name, '') ILIKE :q
+                OR COALESCE(p_owner.email_addresses[1], '') ILIKE :q
+                OR COALESCE(p_target.display_name, '') ILIKE :q
+                OR COALESCE(p_target.email_addresses[1], '') ILIKE :q
+                OR COALESCE(a.email_address, '') ILIKE :q
+            )
+            """
+        )
         params["q"] = f"%{q}%"
     if status:
         conditions.append("c.status = :status")
@@ -895,7 +907,7 @@ async def get_stats(
         review_result = await db.execute(
             text(
                 f"""
-                SELECT count(*)
+                SELECT count(DISTINCT rq.id)
                 FROM review_queue rq
                 JOIN commitments c ON c.id = rq.commitment_id
                 JOIN evidence_links el ON el.commitment_id = c.id
