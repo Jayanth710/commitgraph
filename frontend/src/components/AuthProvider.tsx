@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   getToken,
+  getUser,
   setAuth,
   clearAuth,
 } from "@/lib/auth";
@@ -27,7 +28,7 @@ export function useAuth() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<any | null>(getUser());
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -50,10 +51,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const me = await api.getMe();
         setUser(me);
         setAuth(token, me);
-      } catch {
-        clearAuth();
-        if (pathname !== "/login" && !pathname.startsWith("/auth/callback")) {
-          router.push("/login");
+      } catch (error: any) {
+        const status = error?.response?.status;
+        if (status === 401) {
+          clearAuth();
+          setUser(null);
+          if (pathname !== "/login" && !pathname.startsWith("/auth/callback")) {
+            router.push("/login");
+          }
+        } else {
+          // Preserve the cached session on transient timeouts/5xx so a busy backend
+          // doesn't look like a real logout during refresh.
+          setUser((prev: any | null) => prev ?? getUser());
+          console.error("Auth check failed without a 401; preserving session", error);
         }
       } finally {
         setLoading(false);

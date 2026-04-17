@@ -28,3 +28,4 @@ frontend/next-env.d.ts
 frontend/.vercel/
 .ruff_cachebackend/evaluation/
 backend/evaluation/
+.ruff_cache
