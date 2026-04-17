@@ -223,6 +223,7 @@ async def store_node(state: ExtractionState) -> dict:
                     db,
                     owner_person_id=commitment["owner_person_id"],
                     target_person_id=commitment.get("target_person_id"),
+                    direction=commitment["direction"],
                     summary=commitment["summary"],
                     thread_id=thread_id,
                 )

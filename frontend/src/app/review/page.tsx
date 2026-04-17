@@ -295,6 +295,7 @@ function MergeReviewModal({
   onClose: () => void;
   onSave: (item: ReviewItem, targetCommitmentId: string) => Promise<void>;
 }) {
+  const { activeAccountId } = useAccountFilter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ id: string; summary: string }>>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -304,12 +305,22 @@ function MergeReviewModal({
   async function search() {
     setLoading(true);
     try {
-      const data = await api.searchCommitments(`q=${encodeURIComponent(query)}&limit=10`);
+      const params = new URLSearchParams({
+        q: query.trim(),
+        limit: "10",
+      });
+      if (activeAccountId) params.set("account_id", activeAccountId);
+      const data = await api.searchCommitments(params.toString());
       setResults(
         data.commitments
           .filter((c) => c.id !== item.commitment_id)
           .map((c) => ({ id: c.id, summary: c.summary })),
       );
+      if (!data.commitments.length) {
+        setSelectedId("");
+      }
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -329,6 +340,12 @@ function MergeReviewModal({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && query.trim() && !loading) {
+                e.preventDefault();
+                search();
+              }
+            }}
             placeholder="Search target commitment"
             className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm"
           />
@@ -341,6 +358,11 @@ function MergeReviewModal({
           </button>
 
           <div className="space-y-2 max-h-60 overflow-y-auto">
+            {!loading && query.trim() && results.length === 0 && (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                No matching commitments found.
+              </p>
+            )}
             {results.map((r) => (
               <label
                 key={r.id}
