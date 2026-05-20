@@ -15,6 +15,50 @@ from app.services.gmail_api import GmailApiError, _refresh_access_token
 logger = logging.getLogger(__name__)
 
 
+def _extract_google_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.text.strip() or "Unknown Gmail API error"
+
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return response.text.strip() or "Unknown Gmail API error"
+
+    message = str(error.get("message") or "").strip()
+    errors = error.get("errors")
+    if isinstance(errors, list):
+        reasons = [
+            str(item.get("reason")).strip()
+            for item in errors
+            if isinstance(item, dict) and item.get("reason")
+        ]
+        if reasons:
+            unique_reasons = ", ".join(dict.fromkeys(reasons))
+            if message:
+                return f"{message} (reason={unique_reasons})"
+            return f"reason={unique_reasons}"
+
+    return message or response.text.strip() or "Unknown Gmail API error"
+
+
+def _build_send_error_message(response: httpx.Response, raw_message: str) -> str:
+    lowered = raw_message.lower()
+
+    if response.status_code == 401:
+        return "Stored Gmail credentials are no longer valid. Reconnect the Gmail account."
+
+    if response.status_code == 403 and any(
+        token in lowered for token in ("scope", "insufficient", "permission", "access_token_scope_insufficient")
+    ):
+        return (
+            "The connected Gmail account is missing permission to send mail. "
+            "Reconnect the Gmail account and approve Gmail send access again."
+        )
+
+    return f"Failed to send email via Gmail ({response.status_code}): {raw_message}"
+
+
 async def send_email_via_gmail(
     db: AsyncSession,
     *,
@@ -115,10 +159,9 @@ async def send_email_via_gmail(
                     )
 
     if response.is_error:
-        logger.error("Gmail send failed for %s: %s", account["email_address"], response.text)
-        raise RuntimeError(
-            f"Failed to send email via Gmail ({response.status_code}): {response.text}"
-        )
+        raw_message = _extract_google_error_message(response)
+        logger.error("Gmail send failed for %s: %s", account["email_address"], raw_message)
+        raise RuntimeError(_build_send_error_message(response, raw_message))
 
     payload = response.json()
     return {
