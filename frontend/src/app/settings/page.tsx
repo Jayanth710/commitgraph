@@ -25,6 +25,9 @@ export default function SettingsPage() {
     useState<BriefDeliveryPreference | null>(null);
   const [deliveryRuns, setDeliveryRuns] = useState<BriefDeliveryRun[]>([]);
   const [savingDelivery, setSavingDelivery] = useState(false);
+  const [sendingBriefNow, setSendingBriefNow] = useState<"morning" | "night" | null>(
+    null,
+  );
 
   useEffect(() => {
     async function load() {
@@ -92,31 +95,66 @@ export default function SettingsPage() {
     gcal: { label: "Calendar", color: "text-green-600 dark:text-green-400" },
   };
 
+  const buildDeliveryPreferencePayload = (
+    preference: BriefDeliveryPreference,
+  ) => ({
+    channel: preference.channel,
+    destination:
+      preference.destination?.trim() ||
+      (preference.channel === "email" ? user?.email || null : null),
+    timezone: preference.timezone?.trim() || "America/Denver",
+    morning_enabled: preference.morning_enabled,
+    morning_time: (preference.morning_time || "08:00").slice(0, 5),
+    night_enabled: preference.night_enabled,
+    night_time: (preference.night_time || "20:00").slice(0, 5),
+    sender_account_id: preference.sender_account_id || null,
+    account_id: preference.account_id || null,
+    is_active: preference.is_active,
+  });
+
   const handleSaveDeliveryPreference = async () => {
     if (!deliveryPreference) return;
     setSavingDelivery(true);
     try {
-      const result = await api.updateBriefDeliveryPreferences({
-        channel: deliveryPreference.channel,
-        destination:
-          deliveryPreference.destination?.trim() ||
-          (deliveryPreference.channel === "email" ? user?.email || null : null),
-        timezone: deliveryPreference.timezone?.trim() || "America/Denver",
-        morning_enabled: deliveryPreference.morning_enabled,
-        morning_time: (deliveryPreference.morning_time || "08:00").slice(0, 5),
-        night_enabled: deliveryPreference.night_enabled,
-        night_time: (deliveryPreference.night_time || "20:00").slice(0, 5),
-        sender_account_id: deliveryPreference.sender_account_id || null,
-        account_id: deliveryPreference.account_id || null,
-        is_active: deliveryPreference.is_active,
-      });
+      const result = await api.updateBriefDeliveryPreferences(
+        buildDeliveryPreferencePayload(deliveryPreference),
+      );
       setDeliveryPreference(result.preference);
       toast.success("Brief delivery preferences saved.");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error("Failed to save brief delivery preferences.");
+      toast.error(
+        err.response?.data?.detail || "Failed to save brief delivery preferences.",
+      );
     } finally {
       setSavingDelivery(false);
+    }
+  };
+
+  const handleSendBriefNow = async (briefType: "morning" | "night") => {
+    if (!deliveryPreference) return;
+
+    const gmailAccounts = accounts.filter((account) => account.provider === "gmail");
+    if (deliveryPreference.channel === "email" && gmailAccounts.length === 0) {
+      toast.error("Connect a Gmail account before sending email briefs.");
+      return;
+    }
+
+    setSendingBriefNow(briefType);
+    try {
+      const preferenceResult = await api.updateBriefDeliveryPreferences(
+        buildDeliveryPreferencePayload(deliveryPreference),
+      );
+      setDeliveryPreference(preferenceResult.preference);
+      await api.sendBriefNow({ brief_type: briefType });
+      const deliveryData = await api.getBriefDeliveryRuns();
+      setDeliveryRuns(deliveryData.runs || []);
+      toast.success(`${briefType === "morning" ? "Morning" : "Night"} brief sent.`);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.response?.data?.detail || "Failed to send brief.");
+    } finally {
+      setSendingBriefNow(null);
     }
   };
 
@@ -490,13 +528,33 @@ export default function SettingsPage() {
                   SMS delivery requires Twilio to be configured on the backend.
                   Email delivery uses a connected Gmail account.
                 </p>
-                <button
-                  onClick={handleSaveDeliveryPreference}
-                  disabled={savingDelivery}
-                  className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {savingDelivery ? "Saving..." : "Save preferences"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleSendBriefNow("morning")}
+                    disabled={sendingBriefNow !== null}
+                    className="px-4 py-2 rounded-md bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 text-sm hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    {sendingBriefNow === "morning"
+                      ? "Sending..."
+                      : "Send Morning Now"}
+                  </button>
+                  <button
+                    onClick={() => handleSendBriefNow("night")}
+                    disabled={sendingBriefNow !== null}
+                    className="px-4 py-2 rounded-md bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 text-sm hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    {sendingBriefNow === "night"
+                      ? "Sending..."
+                      : "Send Night Now"}
+                  </button>
+                  <button
+                    onClick={handleSaveDeliveryPreference}
+                    disabled={savingDelivery}
+                    className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {savingDelivery ? "Saving..." : "Save preferences"}
+                  </button>
+                </div>
               </div>
             </>
           )}
