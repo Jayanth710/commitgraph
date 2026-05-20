@@ -361,3 +361,97 @@ async def run_due_brief_deliveries(db: AsyncSession) -> dict[str, int]:
                 failed += 1
 
     return {"sent": sent, "failed": failed, "skipped": skipped}
+
+
+async def send_brief_delivery_now(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    user_email: str | None,
+    brief_type: str,
+    brief_date: date,
+    force: bool = True,
+) -> dict:
+    if brief_type not in {"morning", "night"}:
+        raise ValueError("brief_type must be 'morning' or 'night'")
+
+    pref = await get_or_create_delivery_preference(db, user_id=user_id)
+    destination = pref["destination"] or user_email
+    if not destination:
+        raise RuntimeError("No destination configured for brief delivery")
+
+    if not force and await _already_sent(
+        db,
+        user_id=user_id,
+        channel=pref["channel"],
+        brief_type=brief_type,
+        brief_date=brief_date,
+    ):
+        return {
+            "status": "skipped",
+            "channel": pref["channel"],
+            "destination": destination,
+            "brief_type": brief_type,
+            "brief_date": brief_date.isoformat(),
+            "reason": "already_sent",
+        }
+
+    brief_run = await create_daily_brief_run(
+        db,
+        user_id=user_id,
+        brief_type=brief_type,
+        brief_date=brief_date,
+        account_id=str(pref["account_id"]) if pref["account_id"] else None,
+    )
+
+    try:
+        if pref["channel"] == "email":
+            send_result = await send_email_via_gmail(
+                db,
+                user_id=user_id,
+                to=destination,
+                subject=_brief_subject(brief_type, brief_date),
+                body=brief_run["summary_markdown"],
+                account_id=str(pref["sender_account_id"]) if pref["sender_account_id"] else None,
+            )
+        else:
+            send_result = await send_sms_message(
+                to=destination,
+                body=_brief_sms_text(brief_run["summary_markdown"], brief_type, brief_date),
+            )
+
+        await _record_delivery(
+            db,
+            user_id=user_id,
+            preference_id=str(pref["id"]),
+            brief_run_id=brief_run["id"],
+            channel=pref["channel"],
+            destination=destination,
+            brief_type=brief_type,
+            brief_date=brief_date,
+            status="sent",
+        )
+    except Exception as exc:
+        await _record_delivery(
+            db,
+            user_id=user_id,
+            preference_id=str(pref["id"]),
+            brief_run_id=brief_run["id"],
+            channel=pref["channel"],
+            destination=destination,
+            brief_type=brief_type,
+            brief_date=brief_date,
+            status="failed",
+            error_message=str(exc),
+        )
+        raise
+
+    return {
+        "status": "sent",
+        "channel": pref["channel"],
+        "destination": destination,
+        "brief_type": brief_type,
+        "brief_date": brief_date.isoformat(),
+        "brief_run_id": brief_run["id"],
+        "send_result": send_result,
+    }

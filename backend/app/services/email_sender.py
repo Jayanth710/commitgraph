@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decrypt_token
+from app.services.gmail_api import GmailApiError, _refresh_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ async def send_email_via_gmail(
         params["email"] = account_email
 
     query = (
-        "SELECT id, email_address, access_token_encrypted "
+        "SELECT id, email_address, access_token_encrypted, refresh_token_encrypted "
         "FROM accounts "
         f"WHERE {' AND '.join(clauses)} "
         "ORDER BY created_at ASC LIMIT 1"
@@ -47,7 +48,14 @@ async def send_email_via_gmail(
     if not account:
         raise RuntimeError("No Gmail account available for sending delivery email")
 
-    access_token = decrypt_token(account["access_token_encrypted"])
+    try:
+        access_token = decrypt_token(account["access_token_encrypted"])
+    except ValueError as exc:
+        raise RuntimeError(
+            "Stored Gmail credentials could not be decrypted. "
+            "Your backend SECRET_KEY does not match the key used when this account was connected. "
+            "Use the same SECRET_KEY as the environment that connected the account, or use a separate dev database."
+        ) from exc
 
     message = MIMEText(body, "plain")
     message["to"] = to
@@ -68,9 +76,49 @@ async def send_email_via_gmail(
             json=gmail_body,
         )
 
+        if response.status_code == 401 and account.get("refresh_token_encrypted"):
+            try:
+                await _refresh_access_token(db, dict(account))
+            except GmailApiError as exc:
+                logger.warning(
+                    "Failed to refresh Gmail send token for %s: %s",
+                    account["email_address"],
+                    exc,
+                )
+            else:
+                refreshed_account_result = await db.execute(
+                    text(
+                        """
+                        SELECT id, email_address, access_token_encrypted, refresh_token_encrypted
+                        FROM accounts
+                        WHERE id = :account_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"account_id": account["id"]},
+                )
+                refreshed_account = refreshed_account_result.mappings().first()
+                if refreshed_account:
+                    account = refreshed_account
+                    try:
+                        access_token = decrypt_token(account["access_token_encrypted"])
+                    except ValueError as exc:
+                        raise RuntimeError(
+                            "Stored Gmail credentials could not be decrypted after refresh. "
+                            "Your backend SECRET_KEY does not match the key used when this account was connected. "
+                            "Use the same SECRET_KEY as the environment that connected the account, or use a separate dev database."
+                        ) from exc
+                    response = await client.post(
+                        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        json=gmail_body,
+                    )
+
     if response.is_error:
         logger.error("Gmail send failed for %s: %s", account["email_address"], response.text)
-        raise RuntimeError("Failed to send email via Gmail")
+        raise RuntimeError(
+            f"Failed to send email via Gmail ({response.status_code}): {response.text}"
+        )
 
     payload = response.json()
     return {
