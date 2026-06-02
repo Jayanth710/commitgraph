@@ -20,6 +20,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.core.config import get_settings
+from app.core.cookies import set_auth_cookie
 from app.db.session import AsyncSessionLocal
 from app.services.auth import create_access_token, create_or_get_google_user
 
@@ -148,8 +149,9 @@ async def google_signin_callback(
     jwt_token = create_access_token(str(user["id"]), user["email"])
 
     response = RedirectResponse(
-        url=f"{settings.frontend_url}/auth/callback?token={jwt_token}",
+        url=f"{settings.frontend_url}/auth/callback",
         status_code=302,
     )
+    set_auth_cookie(request, response, jwt_token)
     response.delete_cookie("google_signin_state")
     return response

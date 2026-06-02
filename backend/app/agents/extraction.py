@@ -34,8 +34,14 @@ logger = logging.getLogger(__name__)
 EXTRACTION_SYSTEM_PROMPT = """\
 You are CommitGraph's commitment extraction engine.
 
-Your job: given an email, identify ACTIONABLE COMMITMENTS — specific promises
-that someone made to do something. Return them as structured JSON.
+Your job: given an email or chat message (e.g. Slack), identify ACTIONABLE
+COMMITMENTS — specific promises that someone made to do something. Return them
+as structured JSON.
+
+Chat messages have no subject and use casual phrasing; a clear action with a
+deadline still counts (e.g. "I'll deploy by tomorrow", "can you review the PR by
+Friday"). Senders may be identified by a username/handle rather than an email —
+use whatever identifier is provided for owner_email/target_email.
 
 ## What IS a commitment:
 - "I'll send the proposal by Friday" → deliverable, high confidence
@@ -55,25 +61,35 @@ that someone made to do something. Return them as structured JSON.
 ## Scoring rules for confidence_score:
 - 0.90-1.00: Explicit, unambiguous promise with a clear action ("I will send X by Y")
 - 0.75-0.89: Strong implication of commitment ("I should have that ready next week")
-- 0.60-0.74: Probable but vague ("Let me look into that", "I'll try to get to it")
-- Below 0.60: Do not extract. If you are not reasonably confident, return an empty list.
+- 0.50-0.74: Probable but vague ("Let me look into that", "I'll try to get to it").
+  STILL EXTRACT these — they are routed to human review, so do not silently drop a
+  plausible commitment just because it's uncertain.
+- Below 0.50: Not a real commitment. Leave it out.
 
-## Direction rules:
-Direction must be from the perspective of the EMAIL ACCOUNT OWNER, not just the sender.
+## Summary format:
+Write 'summary' as a concise action phrase: "<verb> <object> [to <person>] [by <deadline>]".
+ALWAYS include the recipient and the deadline when they are known — e.g.
+"Send the Q3 report to John by Friday", NOT just "Send the report". Be specific and consistent.
 
-- "outbound": the account owner is the one who must do the action
-- "inbound": someone other than the account owner is the one who must do the action
+## Direction rules — decide in two steps:
+Step 1 — WHO must perform the action? Put that person in owner_email.
+Step 2 — compare that owner to the ACCOUNT OWNER (account_owner_email):
+  - owner IS the account owner  -> direction = "outbound" (the owner owes it; "I owe")
+  - owner is someone else       -> direction = "inbound"  (it's owed to the account owner)
 
-Rules:
-- If the email says "I will..." and the sender is the account owner, direction = "outbound"
-- If the email says "I will..." and the sender is NOT the account owner, direction = "inbound"
-- If the email tells the account owner to do something ("you need to...", "please send...", "can you review..."), direction = "outbound"
-- If the email tells someone else to do something and that someone is not the account owner, direction = "inbound"
-- Requests to the account owner to share interview availability or schedule a call are real outbound commitments if the requested action is explicit.
+Resolve "I", "me", "you" against the account owner BEFORE deciding:
+- Account owner says "I'll send X to you/them"  -> owner = account owner -> outbound.
+- "Please send X to me" / "Can you do X?" addressed to the account owner
+  -> the account owner must do it -> owner = account owner -> outbound.
+- Someone who is NOT the account owner says "I'll send X to you" (you = account owner)
+  -> owner = that sender -> inbound (it's owed TO the account owner).
+- "Send the deck to me by EOD" where "me" = the account owner
+  -> someone ELSE must send it -> owner = that other person -> inbound.
+- Shared/mutual plans ("let's sync Friday", "we'll both review"): attribute the part the
+  account owner is responsible for and pick that side; if the owner is clearly a
+  participant, default to "outbound".
 
-Also set:
-- owner_email = the person who must do the action
-- target_email = the person the action is owed to, if clear
+target_email = the person the action is owed to, if clear.
 
 ## Output format:
 Return ONLY valid JSON matching this exact schema:
@@ -306,6 +322,103 @@ FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
             ]
         }),
     },
+    # Example: chat/Slack message the ACCOUNT OWNER sent — their own promise is
+    # outbound ("I owe"). Sender matches account_owner_email, so direction=outbound.
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "slack:U07ABC",
+            "sender_email": "slack:U07ABC",
+            "sender_name": "U07ABC",
+            "recipients": [],
+            "subject": "(no subject)",
+            "body_text": (
+                "Hey team, I'll get the deployment done by tomorrow and "
+                "send the review notes by Friday."
+            ),
+            "sent_date": "2026-06-01",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({
+            "commitments": [
+                {
+                    "summary": "Complete the deployment",
+                    "raw_text": "I'll get the deployment done by tomorrow",
+                    "commitment_type": "deliverable",
+                    "owner_email": "slack:U07ABC",
+                    "target_email": None,
+                    "direction": "outbound",
+                    "due_date": "2026-06-02",
+                    "due_date_confidence": 0.8,
+                    "confidence_score": 0.85,
+                },
+                {
+                    "summary": "Send the review notes",
+                    "raw_text": "send the review notes by Friday",
+                    "commitment_type": "deliverable",
+                    "owner_email": "slack:U07ABC",
+                    "target_email": None,
+                    "direction": "outbound",
+                    "due_date": None,
+                    "due_date_confidence": 0.0,
+                    "confidence_score": 0.8,
+                },
+            ]
+        }),
+    },
+    # Example: someone else promises a deliverable TO the account owner -> inbound
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "me@gmail.com",
+            "sender_email": "dana@partner.io",
+            "sender_name": "Dana",
+            "recipients": [{"email": "me@gmail.com", "name": "Me", "type": "to"}],
+            "subject": "Onboarding deck",
+            "body_text": "Hi — I'll get the onboarding deck over to you by end of day tomorrow.",
+            "sent_date": "2026-04-20",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({
+            "commitments": [
+                {
+                    "summary": "Send the onboarding deck to me by end of day tomorrow",
+                    "raw_text": "I'll get the onboarding deck over to you by end of day tomorrow.",
+                    "commitment_type": "deliverable",
+                    "owner_email": "dana@partner.io",
+                    "target_email": "me@gmail.com",
+                    "direction": "inbound",
+                    "due_date": "2026-04-21",
+                    "due_date_confidence": 0.85,
+                    "confidence_score": 0.9,
+                }
+            ]
+        }),
+    },
+    # Example: informational FYI / announcement -> NOT a commitment
+    {
+        "role": "user",
+        "content": json.dumps({
+            "account_owner_email": "me@gmail.com",
+            "sender_email": "ops@company.com",
+            "sender_name": "Ops",
+            "recipients": [{"email": "me@gmail.com", "name": None, "type": "to"}],
+            "subject": "Maintenance window",
+            "body_text": (
+                "Heads up: the staging environment will be down for maintenance "
+                "this weekend. No action needed on your end."
+            ),
+            "sent_date": "2026-04-20",
+        }),
+    },
+    {
+        "role": "assistant",
+        "content": json.dumps({"commitments": []}),
+    },
 ]
 
 
@@ -386,9 +499,8 @@ async def extract_commitments(
     try:
         parsed = _parse_extraction_response(result.content)
         logger.info(
-            "Extracted %d commitments from email subject=%r model=%s cost=$%.6f",
+            "Extracted %d commitments model=%s cost=$%.6f",
             len(parsed.commitments),
-            subject,
             result.model,
             result.cost_usd,
         )
@@ -421,9 +533,8 @@ async def extract_commitments(
     try:
         parsed = _parse_extraction_response(retry_result.content)
         logger.info(
-            "Retry succeeded: %d commitments from email subject=%r",
+            "Retry succeeded: %d commitments",
             len(parsed.commitments),
-            subject,
         )
         return parsed
 

@@ -5,6 +5,8 @@ import {
   Briefcase,
   Building2,
   CalendarDays,
+  ChevronDown,
+  History,
   Search,
   Sparkles,
   Trash2,
@@ -17,7 +19,11 @@ import EmptyState from "@/components/EmptyState";
 import PageTransition from "@/components/PageTransition";
 import { ListSkeleton } from "@/components/Skeleton";
 import { api } from "@/lib/api";
-import type { JobApplication, JobApplicationStatus } from "@/lib/types";
+import type {
+  JobApplication,
+  JobApplicationEvent,
+  JobApplicationStatus,
+} from "@/lib/types";
 
 const STATUS_OPTIONS: JobApplicationStatus[] = [
   "applied",
@@ -29,14 +35,27 @@ const STATUS_OPTIONS: JobApplicationStatus[] = [
   "closed",
 ];
 
+const APPLIED_WITHIN_OPTIONS: { value: string; label: string }[] = [
+  { value: "all", label: "All time" },
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "90", label: "Last 90 days" },
+];
+
 export default function ApplicationsPage() {
   const [items, setItems] = useState<JobApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [appliedWithin, setAppliedWithin] = useState("all");
+  const [appliedFrom, setAppliedFrom] = useState("");
+  const [appliedTo, setAppliedTo] = useState("");
   const [query, setQuery] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingDeleteItem, setPendingDeleteItem] = useState<JobApplication | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [eventsByApp, setEventsByApp] = useState<Record<string, JobApplicationEvent[]>>({});
+  const [loadingEventsId, setLoadingEventsId] = useState<string | null>(null);
   const { activeAccountId } = useAccountFilter();
 
   useEffect(() => {
@@ -46,6 +65,12 @@ export default function ApplicationsPage() {
         const params = new URLSearchParams();
         if (activeAccountId) params.set("account_id", activeAccountId);
         if (statusFilter !== "all") params.set("status", statusFilter);
+        if (appliedFrom || appliedTo) {
+          if (appliedFrom) params.set("applied_from", appliedFrom);
+          if (appliedTo) params.set("applied_to", appliedTo);
+        } else if (appliedWithin !== "all") {
+          params.set("applied_within_days", appliedWithin);
+        }
         if (query.trim()) params.set("q", query.trim());
 
         const data = await api.getJobApplications(params.toString());
@@ -59,7 +84,13 @@ export default function ApplicationsPage() {
     }
 
     load();
-  }, [activeAccountId, statusFilter, query]);
+  }, [activeAccountId, statusFilter, appliedWithin, appliedFrom, appliedTo, query]);
+
+  function selectPreset(value: string) {
+    setAppliedWithin(value);
+    setAppliedFrom("");
+    setAppliedTo("");
+  }
 
   async function handleStatusUpdate(id: string, status: JobApplicationStatus) {
     setUpdatingId(id);
@@ -70,6 +101,18 @@ export default function ApplicationsPage() {
           item.id === id ? { ...item, ...result.job_application } : item,
         ),
       );
+      // The manual change added a status_change event; refresh the timeline if
+      // it's open, otherwise drop the stale cache so the next expand refetches.
+      if (expandedId === id) {
+        loadEvents(id);
+      } else {
+        setEventsByApp((prev) => {
+          if (!(id in prev)) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
       toast.success("Application status updated.");
     } catch (err) {
       console.error(err);
@@ -92,6 +135,29 @@ export default function ApplicationsPage() {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  async function loadEvents(id: string) {
+    setLoadingEventsId(id);
+    try {
+      const data = await api.getJobApplication(id);
+      setEventsByApp((prev) => ({ ...prev, [id]: data.events || [] }));
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load update history.");
+      setExpandedId((current) => (current === id ? null : current));
+    } finally {
+      setLoadingEventsId(null);
+    }
+  }
+
+  function toggleTimeline(id: string) {
+    if (expandedId === id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(id);
+    if (!eventsByApp[id]) loadEvents(id);
   }
 
   const appliedCount = items.filter((item) => item.status === "applied").length;
@@ -156,6 +222,66 @@ export default function ApplicationsPage() {
               ))}
             </select>
           </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              Applied:
+            </span>
+            {APPLIED_WITHIN_OPTIONS.map((option) => {
+              const active = !appliedFrom && !appliedTo && appliedWithin === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => selectPreset(option.value)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    active
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+
+            <span className="mx-1 hidden h-5 w-px bg-gray-200 dark:bg-gray-700 sm:block" />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                value={appliedFrom}
+                max={appliedTo || undefined}
+                onChange={(e) => {
+                  setAppliedFrom(e.target.value);
+                  setAppliedWithin("all");
+                }}
+                aria-label="Applied from"
+                className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <span className="text-xs text-gray-400">to</span>
+              <input
+                type="date"
+                value={appliedTo}
+                min={appliedFrom || undefined}
+                onChange={(e) => {
+                  setAppliedTo(e.target.value);
+                  setAppliedWithin("all");
+                }}
+                aria-label="Applied to"
+                className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {(appliedFrom || appliedTo) && (
+                <button
+                  type="button"
+                  onClick={() => selectPreset("all")}
+                  className="text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {loading ? (
@@ -217,6 +343,27 @@ export default function ApplicationsPage() {
                       <div className="mt-4 rounded-lg bg-gray-50 dark:bg-gray-800 px-3 py-2 text-sm text-gray-600 dark:text-gray-300">
                         {item.raw_text}
                       </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => toggleTimeline(item.id)}
+                      aria-expanded={expandedId === item.id}
+                      className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                    >
+                      <History size={14} />
+                      {expandedId === item.id ? "Hide update history" : "Show update history"}
+                      <ChevronDown
+                        size={14}
+                        className={`transition-transform ${expandedId === item.id ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {expandedId === item.id && (
+                      <Timeline
+                        events={eventsByApp[item.id]}
+                        loading={loadingEventsId === item.id}
+                      />
                     )}
                   </div>
 
@@ -280,6 +427,64 @@ function StatCard({
   );
 }
 
+function Timeline({
+  events,
+  loading,
+}: {
+  events: JobApplicationEvent[] | undefined;
+  loading: boolean;
+}) {
+  if (loading && !events) {
+    return (
+      <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">Loading update history…</p>
+    );
+  }
+
+  if (!events || events.length === 0) {
+    return (
+      <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">No updates recorded yet.</p>
+    );
+  }
+
+  return (
+    <ol className="mt-4 space-y-4 border-l border-gray-200 pl-4 dark:border-gray-700">
+      {events.map((event) => (
+        <li key={event.id} className="relative">
+          <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-blue-500 ring-4 ring-white dark:ring-gray-900" />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-200">
+              {formatEventType(event.event_type)}
+            </span>
+            {event.status && <StatusBadge status={event.status} />}
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              {formatDate(event.event_date || event.created_at || "")}
+            </span>
+          </div>
+          {event.summary && (
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{event.summary}</p>
+          )}
+          {event.subject && (
+            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">From: {event.subject}</p>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function formatEventType(type: string) {
+  switch (type) {
+    case "detected":
+      return "Detected";
+    case "status_change":
+      return "Status change";
+    case "note":
+      return "Update";
+    default:
+      return formatStatus(type);
+  }
+}
+
 function StatusBadge({ status }: { status: JobApplicationStatus }) {
   const classes: Record<JobApplicationStatus, string> = {
     applied: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
@@ -303,7 +508,9 @@ function formatStatus(status: string) {
 }
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleDateString();
+  if (!value) return "Unknown";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Unknown" : parsed.toLocaleDateString();
 }
 
 function DeleteApplicationModal({

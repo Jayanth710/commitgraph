@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from typing import Any
 
 import litellm
@@ -54,15 +55,16 @@ litellm.set_verbose = False
 # ---------------------------------------------------------------------------
 ROUTING_TABLE: dict[str, dict[str, Any]] = {
     "commitment_extraction": {
-        "model": "gpt-4o-mini",
-        # Added anthropic/ prefix here
-        "fallbacks": ["anthropic/claude-haiku-4-5-20241022", "gemini/gemini-2.5-flash"],
+        # Stronger model for accuracy — mini dropped clear commitments and
+        # mislabeled direction. mini stays as a cheaper fallback.
+        "model": "gpt-4o",
+        "fallbacks": ["gpt-4o-mini", "anthropic/claude-haiku-4-5-20251001"],
         "max_tokens": 1024,
-        "temperature": 0.1,   
+        "temperature": 0.1,
     },
     "job_application_extraction": {
         "model": "gpt-4o-mini",
-        "fallbacks": ["anthropic/claude-haiku-4-5-20241022", "gemini/gemini-2.5-flash"],
+        "fallbacks": ["anthropic/claude-haiku-4-5-20251001", "gemini/gemini-2.5-flash"],
         "max_tokens": 1024,
         "temperature": 0.1,
     },
@@ -101,21 +103,36 @@ class LLMResult:
 
 
 # ---------------------------------------------------------------------------
-# Daily cost tracker (in-memory, resets on process restart)
+# Daily cost tracker (in-memory, per-process)
 #
-# For a personal single-user tool this is sufficient.
-# A production multi-user system would track this in the database.
+# The counter auto-resets when the UTC day rolls over, so the budget guard is
+# genuinely daily without needing an external scheduler. Note this is still
+# per-process: each process (API, worker) tracks its own spend, so the global
+# budget is effectively this limit times the number of processes. Sharing a
+# real cross-process budget would require Redis/DB-backed accounting.
 # ---------------------------------------------------------------------------
 _daily_cost_usd: float = 0.0
+_daily_cost_date: date = datetime.now(timezone.utc).date()
+
+
+def _roll_daily_cost_if_new_day() -> None:
+    """Reset the spend counter when the UTC day changes."""
+    global _daily_cost_usd, _daily_cost_date
+    today = datetime.now(timezone.utc).date()
+    if today != _daily_cost_date:
+        _daily_cost_usd = 0.0
+        _daily_cost_date = today
 
 
 def get_daily_cost() -> float:
+    _roll_daily_cost_if_new_day()
     return _daily_cost_usd
 
 
 def reset_daily_cost() -> None:
-    global _daily_cost_usd
+    global _daily_cost_usd, _daily_cost_date
     _daily_cost_usd = 0.0
+    _daily_cost_date = datetime.now(timezone.utc).date()
 
 
 # ---------------------------------------------------------------------------
@@ -157,11 +174,17 @@ async def llm_completion(
         )
 
     # Budget guard — refuse to call if daily limit exceeded.
+    _roll_daily_cost_if_new_day()
     if _daily_cost_usd >= settings.llm_daily_budget_usd:
         raise RuntimeError(
             f"Daily LLM budget exhausted: ${_daily_cost_usd:.4f} "
             f">= ${settings.llm_daily_budget_usd:.2f}"
         )
+
+    # Per-user budget guard (raises UserBudgetExceeded if over the daily cap).
+    from app.services.llm_budget import check_user_budget, record_user_spend
+
+    await check_user_budget()
 
     # Build the model list: primary + fallbacks.
     if override_model:
@@ -221,6 +244,7 @@ async def llm_completion(
                 cost = 0.0
 
             _daily_cost_usd += cost
+            await record_user_spend(cost)
 
             # Warn if approaching budget limit.
             if _daily_cost_usd >= settings.llm_budget_alert_usd:

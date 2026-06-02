@@ -9,10 +9,11 @@ GET  /auth/me              - Get current user profile
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from app.core.cookies import clear_auth_cookie, set_auth_cookie
 from app.db.session import AsyncSessionLocal
 from app.middleware.auth import get_current_user
 from app.services.auth import (
@@ -51,7 +52,7 @@ class GoogleLoginRequest(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 @router.post("/signup")
-async def signup(body: SignupRequest):
+async def signup(body: SignupRequest, request: Request, response: Response):
     """Create a new account with email + password."""
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
@@ -72,6 +73,7 @@ async def signup(body: SignupRequest):
             )
 
     token = create_access_token(str(user["id"]), user["email"])
+    set_auth_cookie(request, response, token)
 
     return {
         "token": token,
@@ -85,7 +87,7 @@ async def signup(body: SignupRequest):
 
 
 @router.post("/login")
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, request: Request, response: Response):
     """Login with email + password."""
     async with AsyncSessionLocal() as db:
         user = await get_user_by_email(db, body.email)
@@ -112,6 +114,7 @@ async def login(body: LoginRequest):
             )
 
     token = create_access_token(str(user["id"]), user["email"])
+    set_auth_cookie(request, response, token)
 
     return {
         "token": token,
@@ -125,7 +128,7 @@ async def login(body: LoginRequest):
 
 
 @router.post("/google-login")
-async def google_login(body: GoogleLoginRequest):
+async def google_login(body: GoogleLoginRequest, request: Request, response: Response):
     """Login or signup with Google. Called from frontend after Google OAuth."""
     async with AsyncSessionLocal() as db:
         async with db.begin():
@@ -137,6 +140,7 @@ async def google_login(body: GoogleLoginRequest):
             )
 
     token = create_access_token(str(user["id"]), user["email"])
+    set_auth_cookie(request, response, token)
 
     return {
         "token": token,
@@ -147,6 +151,13 @@ async def google_login(body: GoogleLoginRequest):
             "auth_provider": user["auth_provider"],
         },
     }
+
+
+@router.post("/logout")
+async def logout(request: Request, response: Response):
+    """Clear the auth cookie."""
+    clear_auth_cookie(request, response)
+    return {"message": "Logged out"}
 
 
 @router.get("/me")

@@ -153,9 +153,8 @@ async def find_duplicate_commitment(
             overlap = compute_overlap_count(summary, row["summary"])
             if sim >= 0.45 or (containment >= 0.8 and overlap >= 3):
                 logger.info(
-                    "Duplicate found (same normalized item): existing=%s similarity=%.2f containment=%.2f overlap=%d "
-                    "existing_summary=%r new_summary=%r",
-                    row["id"], sim, containment, overlap, row["summary"], summary,
+                    "Duplicate found (same normalized item): existing=%s similarity=%.2f containment=%.2f overlap=%d",
+                    row["id"], sim, containment, overlap,
                 )
                 return dict(row)
 
@@ -189,9 +188,8 @@ async def find_duplicate_commitment(
             containment = compute_containment(summary, row["summary"])
             if sim >= similarity_threshold or containment >= 0.8:
                 logger.info(
-                    "Duplicate found (thread match): existing=%s similarity=%.2f containment=%.2f "
-                    "existing_summary=%r new_summary=%r",
-                    row["id"], sim, containment, row["summary"], summary,
+                    "Duplicate found (thread match): existing=%s similarity=%.2f containment=%.2f",
+                    row["id"], sim, containment,
                 )
                 return dict(row)
     
@@ -223,9 +221,8 @@ async def find_duplicate_commitment(
             sim = compute_similarity(summary, row["summary"])
             if sim >= similarity_threshold:
                 logger.info(
-                    "Duplicate found (owner+target match): existing=%s similarity=%.2f "
-                    "existing_summary=%r new_summary=%r",
-                    row["id"], sim, row["summary"], summary,
+                    "Duplicate found (owner+target match): existing=%s similarity=%.2f",
+                    row["id"], sim,
                 )
                 return dict(row)
 
@@ -256,9 +253,8 @@ async def find_duplicate_commitment(
         containment = compute_containment(summary, row["summary"])
         if containment >= 0.9 and len(overlap) >= 3:
             logger.info(
-                "Duplicate found (owner containment match): existing=%s containment=%.2f overlap=%d "
-                "existing_summary=%r new_summary=%r",
-                row["id"], containment, len(overlap), row["summary"], summary,
+                "Duplicate found (owner containment match): existing=%s containment=%.2f overlap=%d",
+                row["id"], containment, len(overlap),
             )
             return dict(row)
     

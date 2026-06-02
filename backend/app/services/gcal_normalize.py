@@ -160,10 +160,9 @@ async def normalize_calendar_event(
     normalized_item_id = str(ni_result.scalar_one())
 
     logger.info(
-        "Normalized calendar event: %s → %s (%s)",
+        "Normalized calendar event: %s → %s",
         event_id,
         normalized_item_id,
-        summary,
     )
 
     return {
@@ -241,8 +240,8 @@ async def link_event_to_commitments(
                 )
                 links_created += 1
                 logger.info(
-                    "Linked calendar event %r to commitment %s (%r) similarity=%.2f",
-                    event_summary, row["id"], row["summary"], sim,
+                    "Linked calendar event to commitment %s similarity=%.2f",
+                    row["id"], sim,
                 )
 
     return links_created

@@ -38,9 +38,11 @@ from app.agents.extraction import extract_commitments
 from app.core.config import get_settings
 from app.services.commitment_store import (
     commitment_has_evidence_for_item,
+    get_commitment_due_date,
     insert_commitment,
     insert_evidence_link,
     insert_review_queue_item,
+    update_commitment_due_date,
 )
 from app.services.entity_resolution import resolve_person
 
@@ -115,9 +117,8 @@ async def extract_node(state: ExtractionState) -> dict:
     commitments = [c.model_dump() for c in result.commitments]
 
     logger.info(
-        "Extract node: found %d commitments in email subject=%r",
+        "Extract node: found %d commitments",
         len(commitments),
-        state.get("subject"),
     )
 
     return {"extracted_commitments": commitments}
@@ -149,25 +150,39 @@ async def resolve_node(state: ExtractionState) -> dict:
 
     async with AsyncSessionLocal() as db:
         async with db.begin():
+            sender_email_norm = (state.get("sender_email") or "").strip().lower()
+            sender_name = state.get("sender_name")
+
             for commitment in extracted:
                 owner_email = commitment["owner_email"]
                 target_email = commitment.get("target_email")
 
-                # Resolve the owner (who made the commitment).
+                # Name the person if they are the message sender (whose name we
+                # know). Helps both email and chat show a name instead of an id.
+                owner_display = (
+                    sender_name
+                    if owner_email and owner_email.strip().lower() == sender_email_norm
+                    else None
+                )
                 owner_person = await resolve_person(
                     db,
                     email=owner_email,
-                    display_name=None,
+                    display_name=owner_display,
                     account_owner_emails=owner_emails,
                 )
 
                 # Resolve the target (who it's directed at), if any.
                 target_person = None
                 if target_email:
+                    target_display = (
+                        sender_name
+                        if target_email.strip().lower() == sender_email_norm
+                        else None
+                    )
                     target_person = await resolve_person(
                         db,
                         email=target_email,
-                        display_name=None,
+                        display_name=target_display,
                         account_owner_emails=owner_emails,
                     )
 
@@ -181,6 +196,24 @@ async def resolve_node(state: ExtractionState) -> dict:
 
     logger.info("Resolve node: resolved %d commitments", len(resolved))
     return {"resolved_commitments": resolved}
+
+
+def _parse_due_date(raw_due_date: Any) -> datetime | None:
+    """Parse an extracted due_date (ISO string or date) into a UTC datetime."""
+    if not raw_due_date:
+        return None
+    try:
+        if isinstance(raw_due_date, str):
+            parsed = date.fromisoformat(raw_due_date)
+            return datetime(parsed.year, parsed.month, parsed.day, tzinfo=timezone.utc)
+        if isinstance(raw_due_date, date):
+            return datetime(
+                raw_due_date.year, raw_due_date.month, raw_due_date.day,
+                tzinfo=timezone.utc,
+            )
+    except (ValueError, TypeError):
+        logger.warning("Invalid due_date: %r", raw_due_date)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +251,7 @@ async def store_node(state: ExtractionState) -> dict:
         async with db.begin():
             for commitment in resolved:
                 confidence = commitment["confidence_score"]
+                due_date = _parse_due_date(commitment.get("due_date"))
 
                 # --- Reconciliation: check for duplicates FIRST ---
                 existing = await find_duplicate_commitment(
@@ -231,8 +265,9 @@ async def store_node(state: ExtractionState) -> dict:
                 )
 
                 if existing:
-                    # Duplicate found — don't create a new commitment.
-                    # Instead, link this email as additional evidence.
+                    # Duplicate found — don't create a new commitment. Link this
+                    # message as evidence, and if the re-statement changed the due
+                    # date, update the existing commitment and flag it for review.
                     existing_id = str(existing["id"])
 
                     already_linked = await commitment_has_evidence_for_item(
@@ -249,13 +284,30 @@ async def store_node(state: ExtractionState) -> dict:
                             extracted_snippet=commitment.get("raw_text"),
                         )
 
+                    if due_date is not None:
+                        existing_due = await get_commitment_due_date(db, existing_id)
+                        if existing_due != due_date:
+                            await update_commitment_due_date(db, existing_id, due_date)
+                            review_row = await insert_review_queue_item(
+                                db,
+                                commitment_id=existing_id,
+                                reason="due_date_changed",
+                                suggested_action=(
+                                    "Due date changed from "
+                                    f"{existing_due.date().isoformat() if existing_due else 'none'}"
+                                    f" to {due_date.date().isoformat()}"
+                                ),
+                            )
+                            review_ids.append(str(review_row["id"]))
+                            logger.info(
+                                "Dedup updated due date %s -> %s for commitment %s",
+                                existing_due, due_date, existing_id,
+                            )
+
                     deduplicated += 1
                     logger.info(
-                        "Deduplicated: new summary=%r matched existing=%s summary=%r. "
-                        "%s",
-                        commitment["summary"],
+                        "Deduplicated: matched existing=%s. %s",
                         existing_id,
-                        existing["summary"],
                         "Evidence already linked for normalized item; skipped duplicate link."
                         if already_linked
                         else "Added evidence_link instead of new commitment.",
@@ -264,25 +316,6 @@ async def store_node(state: ExtractionState) -> dict:
 
                 # --- No duplicate: create new commitment ---
                 status = "confirmed" if confidence >= threshold else "detected"
-
-                # Parse due_date from string to date if present.
-                due_date = None
-                raw_due_date = commitment.get("due_date")
-                if raw_due_date:
-                    try:
-                        if isinstance(raw_due_date, str):
-                            parsed = date.fromisoformat(raw_due_date)
-                            due_date = datetime(
-                                parsed.year, parsed.month, parsed.day,
-                                tzinfo=timezone.utc,
-                            )
-                        elif isinstance(raw_due_date, date):
-                            due_date = datetime(
-                                raw_due_date.year, raw_due_date.month, raw_due_date.day,
-                                tzinfo=timezone.utc,
-                            )
-                    except (ValueError, TypeError):
-                        logger.warning("Invalid due_date: %r", raw_due_date)
 
                 # Insert the commitment.
                 commitment_row = await insert_commitment(
@@ -322,11 +355,10 @@ async def store_node(state: ExtractionState) -> dict:
                     review_ids.append(str(review_row["id"]))
 
                 logger.info(
-                    "Stored commitment %s status=%s confidence=%.2f summary=%r",
+                    "Stored commitment %s status=%s confidence=%.2f",
                     commitment_id,
                     status,
                     confidence,
-                    commitment["summary"],
                 )
 
     if deduplicated:

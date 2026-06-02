@@ -167,6 +167,33 @@ async def insert_evidence_link(
     return dict(result.mappings().one())
 
 
+async def get_commitment_due_date(
+    db: AsyncSession,
+    commitment_id: str,
+) -> datetime | None:
+    """Return a commitment's current due_date (or None)."""
+    result = await db.execute(
+        text("SELECT due_date FROM commitments WHERE id = :id"),
+        {"id": commitment_id},
+    )
+    row = result.first()
+    return row[0] if row else None
+
+
+async def update_commitment_due_date(
+    db: AsyncSession,
+    commitment_id: str,
+    due_date: datetime | None,
+) -> None:
+    """Update a commitment's due date (e.g. when a re-stated commitment changes it)."""
+    await db.execute(
+        text(
+            "UPDATE commitments SET due_date = :due_date, updated_at = now() WHERE id = :id"
+        ),
+        {"due_date": due_date, "id": commitment_id},
+    )
+
+
 async def insert_review_queue_item(
     db: AsyncSession,
     *,

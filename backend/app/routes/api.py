@@ -6,9 +6,10 @@ All endpoints are user-scoped — each user sees only their own data.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import text
 
 from app.db.session import AsyncSessionLocal
@@ -1088,12 +1089,28 @@ async def weekly_digest(
 @router.post("/commitments/{commitment_id}/calendar-event")
 async def create_calendar_event_for_commitment(
     commitment_id: str,
+    body: dict | None = Body(default=None),
     user: dict = Depends(get_current_user),
 ):
-    from app.services.gcal_create import create_commitment_event
+    from app.services.gcal_create import create_commitment_event, CalendarEventError
     from app.services.dashboard_queries import get_commitment_calendar_create_payload
 
     user_id = str(user["id"])
+
+    # A user-supplied date turns this into a manual reminder: the user picks a
+    # date for a commitment the extractor left dateless. An explicit click is
+    # the user's authorization, so the confidence gate doesn't apply here.
+    requested_due_date: str | None = None
+    if body:
+        requested_due_date = body.get("due_date") or None
+    if requested_due_date:
+        try:
+            date.fromisoformat(str(requested_due_date))
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid due_date: expected YYYY-MM-DD",
+            )
 
     async with AsyncSessionLocal() as db:
         row = await get_commitment_calendar_create_payload(
@@ -1105,19 +1122,17 @@ async def create_calendar_event_for_commitment(
     if not row:
         raise HTTPException(status_code=404, detail="Commitment not found")
 
-    if not row["due_date"]:
-        raise HTTPException(status_code=400, detail="Commitment has no due date")
-
-    if row["status"] not in {"confirmed", "in_progress"}:
+    if row["status"] in {"completed", "abandoned"}:
         raise HTTPException(
             status_code=400,
-            detail="Only confirmed or in-progress commitments can be added to calendar",
+            detail="Completed or abandoned commitments cannot be added to calendar",
         )
 
-    if (row["confidence_score"] or 0) < 0.8:
+    effective_due_date = requested_due_date or row["due_date"]
+    if not effective_due_date:
         raise HTTPException(
             status_code=400,
-            detail="Commitment confidence is too low to add to calendar",
+            detail="A due date is required — add a reminder date first",
         )
 
     if row["calendar_event_id"]:
@@ -1127,15 +1142,35 @@ async def create_calendar_event_for_commitment(
             "event_link": row.get("calendar_event_link"),
         }
 
-    event = await create_commitment_event(
-        account_id=str(row["account_id"]),
-        summary=row["summary"],
-        due_date=str(row["due_date"]),
-        direction=row["direction"],
-        owner_email=row.get("owner_email"),
-        target_email=row.get("target_email"),
-        commitment_id=commitment_id,
-    )
+    # Persist a user-supplied reminder date so the commitment and its reminders
+    # reflect it going forward.
+    if requested_due_date and str(requested_due_date) != str(row["due_date"]):
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                await db.execute(
+                    text(
+                        """
+                        UPDATE commitments
+                        SET due_date = :due_date, updated_at = now()
+                        WHERE id = :cid AND user_id = :uid
+                        """
+                    ),
+                    {"due_date": requested_due_date, "cid": commitment_id, "uid": user_id},
+                )
+
+    try:
+        event = await create_commitment_event(
+            account_id=str(row["account_id"]),
+            summary=row["summary"],
+            due_date=str(effective_due_date),
+            direction=row["direction"],
+            owner_email=row.get("owner_email"),
+            target_email=row.get("target_email"),
+            commitment_id=commitment_id,
+            user_id=user_id,
+        )
+    except CalendarEventError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
     if not event:
         raise HTTPException(status_code=500, detail="Failed to create calendar event")

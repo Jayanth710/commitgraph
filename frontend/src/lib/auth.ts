@@ -1,10 +1,9 @@
-const TOKEN_KEY = "commitgraph_token";
-const USER_KEY = "commitgraph_user";
+// The JWT now lives in an httpOnly cookie that JavaScript cannot read, so the
+// browser sends it automatically and an XSS payload can't steal it. We only
+// cache the non-sensitive user profile here for a fast initial render; the
+// source of truth for auth is the cookie + GET /auth/me.
 
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
-}
+const USER_KEY = "commitgraph_user";
 
 export function getUser(): any | null {
   if (typeof window === "undefined") return null;
@@ -12,16 +11,12 @@ export function getUser(): any | null {
   return raw ? JSON.parse(raw) : null;
 }
 
-export function setAuth(token: string, user: any): void {
-  localStorage.setItem(TOKEN_KEY, token);
+export function setUser(user: any): void {
+  if (typeof window === "undefined") return;
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearAuth(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  if (typeof window === "undefined") return;
   localStorage.removeItem(USER_KEY);
-}
-
-export function isAuthenticated(): boolean {
-  return !!getToken();
 }

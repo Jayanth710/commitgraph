@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,16 @@ from app.db.session import AsyncSessionLocal
 from app.middleware.auth import get_current_user
 
 router = APIRouter(prefix="/api", tags=["job-applications"])
+
+
+def _parse_date_param(value: str, field: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field}: expected YYYY-MM-DD, got {value!r}",
+        )
 
 
 def _serialize_row(row) -> dict[str, Any]:
@@ -27,6 +38,9 @@ async def list_job_applications(
     status: str | None = Query(default=None),
     q: str = Query(default="", min_length=0),
     account_id: str | None = Query(default=None),
+    applied_within_days: int | None = Query(default=None, ge=1),
+    applied_from: str | None = Query(default=None),
+    applied_to: str | None = Query(default=None),
 ):
     user_id = str(user["id"])
     conditions = ["ja.user_id = :user_id", "ja.deleted_at IS NULL"]
@@ -43,6 +57,19 @@ async def list_job_applications(
     if account_id:
         conditions.append("ja.account_id = :account_id")
         params["account_id"] = account_id
+    # date_applied is a DATE; rows without an applied date are excluded while any
+    # window is active since they can't be confirmed in range. An explicit
+    # from/to range takes precedence over the relative preset.
+    if applied_from or applied_to:
+        if applied_from:
+            conditions.append("ja.date_applied >= :applied_from")
+            params["applied_from"] = _parse_date_param(applied_from, "applied_from")
+        if applied_to:
+            conditions.append("ja.date_applied <= :applied_to")
+            params["applied_to"] = _parse_date_param(applied_to, "applied_to")
+    elif applied_within_days:
+        conditions.append("ja.date_applied >= :applied_since")
+        params["applied_since"] = date.today() - timedelta(days=applied_within_days)
 
     where_clause = "WHERE " + " AND ".join(conditions)
 
@@ -150,9 +177,41 @@ async def get_job_application(
         )
         events = event_result.mappings().all()
 
+        # Commitments that came from the same email thread as this application —
+        # e.g. "complete the assessment", "send availability". Deterministic
+        # link via shared thread/source email, so no extra extraction or guesswork.
+        linked_result = await db.execute(
+            text(
+                """
+                SELECT DISTINCT ON (c.id)
+                    c.id,
+                    c.summary,
+                    c.status,
+                    c.direction,
+                    c.due_date,
+                    c.calendar_event_id
+                FROM commitments c
+                JOIN evidence_links el ON el.commitment_id = c.id
+                JOIN normalized_items ni ON ni.id = el.normalized_item_id
+                JOIN accounts a ON a.id = ni.account_id
+                JOIN job_applications ja ON ja.id = :job_application_id
+                WHERE a.user_id = :user_id
+                  AND c.status <> 'abandoned'
+                  AND (
+                        (ja.source_thread_id IS NOT NULL AND ni.thread_id = ja.source_thread_id)
+                     OR ni.id = ja.source_normalized_item_id
+                  )
+                ORDER BY c.id, c.due_date ASC NULLS LAST, c.created_at DESC
+                """
+            ),
+            {"job_application_id": job_application_id, "user_id": user_id},
+        )
+        linked_commitments = linked_result.mappings().all()
+
     return {
         "job_application": _serialize_row(application),
         "events": [_serialize_row(event) for event in events],
+        "linked_commitments": [_serialize_row(row) for row in linked_commitments],
     }
 
 

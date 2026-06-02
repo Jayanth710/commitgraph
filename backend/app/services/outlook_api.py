@@ -85,6 +85,7 @@ async def graph_request(
     path: str,
     *,
     params: dict[str, str] | None = None,
+    json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Microsoft Graph API.
 
@@ -95,19 +96,26 @@ async def graph_request(
     headers = {"Authorization": f"Bearer {access_token}"}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.request(method, url, headers=headers, params=params)
+        response = await client.request(
+            method, url, headers=headers, params=params, json=json_body
+        )
 
         if response.status_code == 401:
             await _refresh_outlook_token(db, account)
             access_token = decrypt_token(account["access_token_encrypted"])
             headers = {"Authorization": f"Bearer {access_token}"}
-            response = await client.request(method, url, headers=headers, params=params)
+            response = await client.request(
+                method, url, headers=headers, params=params, json=json_body
+            )
 
     if response.is_error:
         raise OutlookApiError(
             f"Graph API error: {method} {path} → {response.status_code} {response.text}"
         )
 
+    # Graph returns 204 No Content for some PATCH/DELETE calls.
+    if not response.content:
+        return {}
     return response.json()
 
 
