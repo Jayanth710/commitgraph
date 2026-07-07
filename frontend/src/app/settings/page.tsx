@@ -9,7 +9,7 @@ import { toast } from "react-toastify";
 import PageTransition from "@/components/PageTransition";
 import BriefDeliverySettings from "@/components/BriefDeliverySettings";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
