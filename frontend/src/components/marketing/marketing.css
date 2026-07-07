@@ -84,3 +84,24 @@ html {
   .cg-card-lg { padding: 28px 22px !important; }
   .cg-nav { padding: 12px 16px !important; }
 }
+
+
+/* ── product tour (Tour.tsx) ─────────────────────────── */
+@keyframes cg-t-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+    @keyframes cg-t-ap { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+    @keyframes cg-t-out { to { opacity: 0; } }
+    @keyframes cg-t-core { 0%,100% { box-shadow: 0 0 30px -10px rgba(59,130,246,0.6); transform: scale(1); } 50% { box-shadow: 0 0 52px -6px rgba(59,130,246,0.95); transform: scale(1.045); } }
+    @keyframes cg-t-slide { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+    @keyframes cg-t-p1 { 0% { left: 20%; opacity: 0; } 10% { opacity: 1; } 46% { left: 50%; opacity: 1; } 56% { left: 50%; opacity: 0; } 100% { left: 50%; opacity: 0; } }
+    @keyframes cg-t-p2 { 0% { left: 50%; opacity: 0; } 46% { left: 50%; opacity: 0; } 56% { opacity: 1; } 90% { left: 80%; opacity: 1; } 100% { left: 82%; opacity: 0; } }
+    @keyframes cg-t-hand { from { transform: translate(-50%,-100%) rotate(0deg); } to { transform: translate(-50%,-100%) rotate(360deg); } }
+    @keyframes cg-t-tap { 0%,100% { transform: scale(1); } 45% { transform: scale(0.8); } }
+    @keyframes cg-t-knob { to { transform: translateX(20px); } }
+    @keyframes cg-t-spin { to { transform: rotate(360deg); } }
+    @keyframes cg-t-pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+    [data-tour][data-paused] [data-tscene] * { animation-play-state: paused !important; }
+    @media (max-width: 640px) {
+      #cg-t-stage { height: 400px !important; }
+      .cg-t-flow { grid-template-columns: 1fr !important; gap: 10px !important; }
+      .cg-t-flow > div:nth-child(2) { display: none !important; }
+    }
