@@ -58,7 +58,7 @@ function SignUp({ setIsLogin }: SignUpProps) {
         password: data.password,
       });
       toast.success(`${data.email} registration was successful.`);
-      login(response.user);
+      login(response.token, response.user);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response) {
         const msg = err.response.data?.detail || err.response.data?.message || "Registration failed";
@@ -84,9 +84,10 @@ function SignUp({ setIsLogin }: SignUpProps) {
   };
 
   const handleGoogleLogin = () => {
-    // Same-origin: the /auth/* proxy forwards this to the backend, so the OAuth
-    // cookie is set on this domain (first-party).
-    window.location.href = "/auth/google-signin/start";
+    // Go straight to the backend; it redirects to /auth/callback?token=... which
+    // stores the JWT (Bearer). No cookie or proxy needed.
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    window.location.href = `${apiUrl}/auth/google-signin/start`;
   };
 
   return (

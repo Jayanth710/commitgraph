@@ -1,5 +1,5 @@
 import axios from "axios";
-import { clearAuth, isPublicPath } from "@/lib/auth";
+import { getToken, clearAuth, isPublicPath } from "@/lib/auth";
 import type {
   CalendarEventsResponse,
   CommitmentDetailResponse,
@@ -12,14 +12,20 @@ import type {
 } from "@/lib/types";
 
 const client = axios.create({
-  // Always same-origin (""). Requests hit THIS app's domain and are proxied to
-  // the backend by next.config rewrites, keeping the auth cookie first-party.
-  // Do NOT read NEXT_PUBLIC_API_URL here — a cross-site value re-breaks auth.
-  baseURL: "",
+  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
-  // Send the httpOnly auth cookie on every cross-origin request.
-  withCredentials: true,
+});
+
+// Attach the JWT (from localStorage) as a Bearer header on every request. A
+// header is sent cross-site with no cookie or proxy, so Vercel <-> Cloud Run
+// works directly.
+client.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 client.interceptors.response.use(

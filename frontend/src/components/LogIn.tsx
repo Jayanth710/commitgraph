@@ -38,7 +38,7 @@ const LogIn: React.FC<LogInProps> = ({ className, setIsLogin, ...props }) => {
     try {
       const response = await api.login({ email: data.email, password: data.password });
       toast.success("Logged in successfully!");
-      login(response.user);
+      login(response.token, response.user);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response) {
         const msg = error.response.data?.detail || "Invalid credentials";
@@ -59,9 +59,10 @@ const LogIn: React.FC<LogInProps> = ({ className, setIsLogin, ...props }) => {
   };
 
   const handleGoogleLogin = () => {
-    // Same-origin: the /auth/* proxy forwards this to the backend, so the OAuth
-    // cookie is set on this domain (first-party).
-    window.location.href = "/auth/google-signin/start";
+    // Go straight to the backend; it redirects to /auth/callback?token=... which
+    // stores the JWT (Bearer). No cookie or proxy needed.
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    window.location.href = `${apiUrl}/auth/google-signin/start`;
   };
 
   return (

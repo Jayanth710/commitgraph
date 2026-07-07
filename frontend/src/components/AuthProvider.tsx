@@ -1,13 +1,13 @@
 "use client";
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { getUser, setUser as cacheUser, clearAuth, isPublicPath } from "@/lib/auth";
+import { getToken, getUser, setAuth, clearAuth, isPublicPath } from "@/lib/auth";
 import { api } from "@/lib/api";
 
 type AuthContextType = {
   user: any | null;
   loading: boolean;
-  login: (user: any) => void;
+  login: (token: string, user: any) => void;
   logout: () => void;
 };
 
@@ -30,11 +30,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function checkAuth() {
+      // Let the OAuth callback page store its token first.
+      await new Promise((r) => setTimeout(r, 100));
+
+      const token = getToken();
+      if (!token) {
+        setLoading(false);
+        // No token: only bounce to /login on protected routes. Public routes
+        // (the landing "/", /login, /privacy, /terms, /auth/callback) stay put
+        // so the marketing landing can render for logged-out visitors.
+        if (!isPublicPath(pathname)) {
+          router.push("/login");
+        }
+        return;
+      }
+
       try {
-        // The auth cookie (if present) authenticates this request.
+        // The Bearer token (attached by lib/api.ts) authenticates this request.
         const me = await api.getMe();
         setUser(me);
-        cacheUser(me);
+        setAuth(token, me);
       } catch (error: any) {
         const status = error?.response?.status;
         if (status === 401) {
@@ -56,19 +71,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [pathname, router]);
 
-  const login = (userData: any) => {
-    // The backend already set the httpOnly auth cookie on the login response.
-    cacheUser(userData);
+  const login = (token: string, userData: any) => {
+    setAuth(token, userData);
     setUser(userData);
     router.push("/");
   };
 
-  const logout = async () => {
-    try {
-      await api.logout();
-    } catch {
-      // Even if the network call fails, clear local state below.
-    }
+  const logout = () => {
     clearAuth();
     setUser(null);
     router.push("/login");
