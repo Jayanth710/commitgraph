@@ -1,6 +1,7 @@
 import axios from "axios";
-import { getToken, clearAuth } from "@/lib/auth";
+import { clearAuth, isPublicPath } from "@/lib/auth";
 import type {
+  CalendarEventsResponse,
   CommitmentDetailResponse,
   CommitmentListResponse,
   DailyBriefListResponse,
@@ -14,22 +15,22 @@ const client = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
-});
-
-client.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  // Send the httpOnly auth cookie on every cross-origin request.
+  withCredentials: true,
 });
 
 client.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Redirect on 401 — but never on public paths (landing "/", /login, /privacy,
+    // /terms, OAuth callback). Otherwise the logged-out /auth/me probe would hard
+    // redirect the marketing landing straight to /login.
     if (error.response?.status === 401 && typeof window !== "undefined") {
-      clearAuth();
-      window.location.href = "/login";
+      const path = window.location.pathname;
+      if (!isPublicPath(path)) {
+        clearAuth();
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }
@@ -42,6 +43,7 @@ export const api = {
     client.post("/auth/login", body).then((r) => r.data),
   googleLogin: (body: { email: string; name?: string; avatar_url?: string }) =>
     client.post("/auth/google-login", body).then((r) => r.data),
+  logout: () => client.post("/auth/logout").then((r) => r.data),
   getMe: () => client.get("/auth/me").then((r) => r.data),
 
     getStats: (params?: string) =>
@@ -106,8 +108,17 @@ export const api = {
     client.post("/api/email/send", body).then((r) => r.data),
   startGmailWatch: (email: string) =>
     client.post(`/gmail/watch/start?email_address=${email}`).then((r) => r.data),
-  createCalendarEvent: (commitmentId: string) =>
-    client.post(`/api/commitments/${commitmentId}/calendar-event`).then((r) => r.data),
+  getCalendarEvents: (params?: string): Promise<CalendarEventsResponse> =>
+    client.get(`/api/calendar/events${params ? `?${params}` : ""}`).then((r) => r.data),
+  syncCalendar: (params?: string) =>
+    client.post(`/api/calendar/sync${params ? `?${params}` : ""}`).then((r) => r.data),
+  createCalendarEvent: (commitmentId: string, dueDate?: string) =>
+    client
+      .post(
+        `/api/commitments/${commitmentId}/calendar-event`,
+        dueDate ? { due_date: dueDate } : {},
+      )
+      .then((r) => r.data),
   deleteCalendarEvent: (commitmentId: string) =>
     client.delete(`/api/commitments/${commitmentId}/calendar-event`).then((r) => r.data),
 };
