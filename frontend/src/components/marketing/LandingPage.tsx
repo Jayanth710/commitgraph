@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect } from "react";
-import PipelineDiagram from "./PipelineDiagram";
+import Tour from "./Tour";
 import TraceTerminal from "./TraceTerminal";
 import CountUp from "./CountUp";
 import { useReveal } from "./useReveal";
@@ -104,6 +104,16 @@ function MiniRow({ title, meta, tag, last = false }: { title: string; meta: stri
 export default function LandingPage() {
   useReveal();
 
+  const replayTour = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const host = document.querySelector("[data-tour]");
+    if (host) {
+      const r = host.getBoundingClientRect();
+      window.scrollTo({ top: r.top + window.pageYOffset - 96, behavior: "smooth" });
+    }
+    window.dispatchEvent(new CustomEvent("cg-tour-replay"));
+  };
+
   // scrollspy + cursor spotlight
   useEffect(() => {
     const links = Array.from(document.querySelectorAll<HTMLAnchorElement>(".cg-navlink"));
@@ -178,7 +188,7 @@ export default function LandingPage() {
             CommitGraph turns Gmail, Outlook &amp; Slack into commitments, job-application timelines, and daily briefs — one LangGraph pipeline, grounded in the exact line that earned it.
           </p>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 32, flexWrap: "wrap", animation: "cg-rise 0.7s ease 0.24s both" }}>
-            <a href={LIVE_DEMO} style={primaryBtn}>Try the live demo</a>
+            <a href={LIVE_DEMO} onClick={replayTour} style={primaryBtn}>Try the live demo</a>
             <a href="#how" style={ghostBtn}>Watch the workflow<span style={{ color: A }}>↓</span></a>
           </div>
           <div style={{ marginTop: 56, padding: 20, borderRadius: 22, border: BORDER, background: "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.008))", boxShadow: "0 40px 90px -40px rgba(0,0,0,0.8)", animation: "cg-rise 0.9s ease 0.34s both" }}>
@@ -186,13 +196,9 @@ export default function LandingPage() {
               <span style={{ width: 11, height: 11, borderRadius: 999, background: "#f87171" }} />
               <span style={{ width: 11, height: 11, borderRadius: 999, background: "#fbbf24" }} />
               <span style={{ width: 11, height: 11, borderRadius: 999, background: "#34d399" }} />
-              <span style={{ marginLeft: 10, fontFamily: MONO, fontSize: 11, color: DIM }}>commitgraph · live pipeline</span>
+              <span style={{ marginLeft: 10, fontFamily: MONO, fontSize: 11, color: DIM }}>commitgraph · guided tour</span>
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <div style={{ minWidth: 660 }}>
-                <PipelineDiagram />
-              </div>
-            </div>
+            <Tour />
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 28, marginTop: 30, flexWrap: "wrap", fontFamily: MONO, fontSize: 13, color: DIM, animation: "cg-rise 0.9s ease 0.44s both" }}>
             <span><b style={{ color: "#e2e8f0" }}>87%</b> precision</span>
@@ -273,7 +279,7 @@ export default function LandingPage() {
           </div>
           <div className="cg-card" style={{ padding: 8, borderRadius: 18, border: BORDER, background: "rgba(255,255,255,0.02)" }}>
             <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid rgba(148,163,184,0.1)" }}>
-              <MiniRow title="Send Q3 forecast to Priya" meta="You → priya@acme.com · Due Fri, Jul 10" tag={<span style={pill("rgba(30,58,138,0.5)", "#93c5fd")}>confirmed</span>} />
+              <MiniRow title="Send Q3 forecast to Babitha" meta="You → babitha@acme.com · Due Fri, Jul 10" tag={<span style={pill("rgba(30,58,138,0.5)", "#93c5fd")}>confirmed</span>} />
               <MiniRow title="Review contract redlines" meta="← legal@partner.io · Due yesterday" tag={<span style={pill("rgba(127,29,29,0.5)", "#fca5a5")}>overdue</span>} />
               <MiniRow title="Share onboarding deck" meta="You → sam@acme.com · confidence 62%" tag={<span style={pill("rgba(120,53,15,0.5)", "#fcd34d")}>review</span>} last />
             </div>
@@ -475,7 +481,7 @@ export default function LandingPage() {
             Multi-tenant. Connect Gmail, Outlook &amp; Slack, sync your calendar, and let the pipeline do the reading.
           </p>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 30, flexWrap: "wrap" }}>
-            <a href={LIVE_DEMO} style={{ ...primaryBtn, padding: "14px 26px", borderRadius: 12 }}>Try the live demo</a>
+            <a href={LIVE_DEMO} onClick={replayTour} style={{ ...primaryBtn, padding: "14px 26px", borderRadius: 12 }}>Try the live demo</a>
             <a href={SIGN_IN} style={{ ...ghostBtn, padding: "14px 24px", borderRadius: 12 }}>Sign in</a>
           </div>
         </div>
