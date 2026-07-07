@@ -12,9 +12,10 @@ import type {
 } from "@/lib/types";
 
 const client = axios.create({
-  // "" = same-origin. Requests go to this frontend's own domain and are proxied
-  // to the backend by next.config rewrites, keeping the auth cookie first-party.
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "",
+  // Always same-origin (""). Requests hit THIS app's domain and are proxied to
+  // the backend by next.config rewrites, keeping the auth cookie first-party.
+  // Do NOT read NEXT_PUBLIC_API_URL here — a cross-site value re-breaks auth.
+  baseURL: "",
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
   // Send the httpOnly auth cookie on every cross-origin request.
