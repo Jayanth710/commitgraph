@@ -44,9 +44,16 @@ export default function TopBar() {
           </button>
 
           {accounts.map((account) => {
-            const initial = (account.email_address || "?")[0].toUpperCase();
+            // Slack/Discord accounts have no email — fall back to the workspace
+            // name (display_name), then the provider.
+            const label =
+              account.email_address ||
+              account.display_name ||
+              account.provider ||
+              "Account";
+            const initial = (label || "?")[0].toUpperCase();
             const active = activeAccountId === account.id;
-            const shortLabel = (account.email_address || "")
+            const shortLabel = label
               .replace("@gmail.com", "")
               .replace("@outlook.com", "")
               .slice(0, 14);
@@ -55,7 +62,7 @@ export default function TopBar() {
               <button
                 key={account.id}
                 onClick={() => setActiveAccountId(account.id)}
-                title={account.email_address}
+                title={label}
                 className={`flex items-center gap-2 pl-2 pr-3 h-10 rounded-full text-sm font-medium border transition-colors shrink-0 ${
                   active
                     ? "bg-blue-600 text-white border-blue-600 shadow-sm"

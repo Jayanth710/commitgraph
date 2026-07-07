@@ -136,6 +136,29 @@ export type JobApplicationDetailResponse = {
   events: JobApplicationEvent[];
 };
 
+export type CalendarEventAttendee = {
+  email: string;
+  name?: string | null;
+  response_status?: string | null;
+};
+
+export type CalendarEvent = {
+  id: string;
+  title: string;
+  start: string | null;
+  end: string | null;
+  all_day: boolean;
+  location?: string | null;
+  attendees: CalendarEventAttendee[];
+  account_email?: string | null;
+  linked_commitment_id?: string | null;
+};
+
+export type CalendarEventsResponse = {
+  events: CalendarEvent[];
+  total: number;
+};
+
 export type DailyBriefType = "morning" | "night";
 
 export type DailyBriefItem = {
@@ -184,6 +207,7 @@ export type BriefDeliveryPreference = {
   sender_account_id?: string | null;
   account_id?: string | null;
   is_active: boolean;
+  deadline_reminders_enabled: boolean;
   created_at?: string;
   updated_at?: string;
 };

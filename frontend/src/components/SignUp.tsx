@@ -58,7 +58,7 @@ function SignUp({ setIsLogin }: SignUpProps) {
         password: data.password,
       });
       toast.success(`${data.email} registration was successful.`);
-      login(response.token, response.user);
+      login(response.user);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response) {
         const msg = err.response.data?.detail || err.response.data?.message || "Registration failed";
