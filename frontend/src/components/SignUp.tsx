@@ -84,7 +84,7 @@ function SignUp({ setIsLogin }: SignUpProps) {
   };
 
   const handleGoogleLogin = () => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
     window.location.href = `${apiUrl}/auth/google-signin/start`;
   };
 
