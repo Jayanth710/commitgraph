@@ -21,10 +21,23 @@ dependencies = [
     "PyJWT>=2.8.0",
     "passlib[bcrypt]>=1.7.4",
     "ruff>=0.15.7",
+    "sentry-sdk[fastapi]>=2.0.0",
+    "langfuse>=2.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "alembic>=1.18.0",
+    "psycopg2-binary>=2.9.0",
 ]
 
 [tool.setuptools.packages.find]
 include = ["app*", "worker*", "scheduler*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

@@ -15,11 +15,13 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 
-from app.core.security import decrypt_token
-
 logger = logging.getLogger(__name__)
 
 GCAL_API_BASE = "https://www.googleapis.com/calendar/v3"
+
+
+class CalendarEventError(Exception):
+    """Raised when the Google Calendar API rejects an event create request."""
 
 
 async def create_commitment_event(
@@ -31,60 +33,40 @@ async def create_commitment_event(
     owner_email: str | None = None,
     target_email: str | None = None,
     commitment_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any] | None:
     from app.db.session import AsyncSessionLocal
-    from app.core.security import encrypt_token
-    from app.core.config import get_settings
+    from app.services.google_token import get_fresh_google_access_token
 
-    settings = get_settings()
-
-    # Get tokens
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            text(
-                """
-                SELECT access_token_encrypted, refresh_token_encrypted, email_address
-                FROM accounts
-                WHERE id = :aid AND provider = 'gmail'
-                """
-            ),
-            {"aid": account_id},
-        )
-        account = result.mappings().first()
-
-    if not account:
-        logger.warning("No Gmail account found for id=%s", account_id)
-        return None
-
-    access_token = decrypt_token(account["access_token_encrypted"])
-
-    # Try to refresh the token first
-    if account["refresh_token_encrypted"]:
-        refresh_token = decrypt_token(account["refresh_token_encrypted"])
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    "https://oauth2.googleapis.com/token",
-                    data={
-                        "client_id": settings.google_client_id,
-                        "client_secret": settings.google_client_secret,
-                        "refresh_token": refresh_token,
-                        "grant_type": "refresh_token",
-                    },
+    # Candidate Gmail accounts for the event: the commitment's source account
+    # first, then the user's other Gmail accounts. This way a stale account
+    # whose token can't be decrypted doesn't block the reminder — it just lands
+    # on another of the user's calendars.
+    candidate_ids: list[str] = [account_id]
+    if user_id:
+        async with AsyncSessionLocal() as db:
+            others = (
+                await db.execute(
+                    text(
+                        "SELECT id FROM accounts "
+                        "WHERE user_id = :uid AND provider = 'gmail' AND id <> :aid"
+                    ),
+                    {"uid": user_id, "aid": account_id},
                 )
-                if resp.is_success:
-                    new_tokens = resp.json()
-                    access_token = new_tokens["access_token"]
-                    # Save refreshed token
-                    async with AsyncSessionLocal() as db:
-                        async with db.begin():
-                            await db.execute(
-                                text("UPDATE accounts SET access_token_encrypted = :token WHERE id = :aid"),
-                                {"token": encrypt_token(access_token), "aid": account_id},
-                            )
-                    logger.info("Refreshed access token for calendar event creation")
-        except Exception as exc:
-            logger.warning("Token refresh failed, using existing: %s", exc)
+            ).scalars().all()
+        candidate_ids.extend(str(o) for o in others)
+
+    access_token: str | None = None
+    for cand in candidate_ids:
+        access_token = await get_fresh_google_access_token(cand)
+        if access_token:
+            break
+
+    if not access_token:
+        raise CalendarEventError(
+            "Couldn't access your Google Calendar — please reconnect a Gmail "
+            "account in Settings, then try again."
+        )
 
     # Build the calendar event
     prefix = "📤 You committed:" if direction == "outbound" else "📥 Committed to you:"
@@ -135,15 +117,25 @@ async def create_commitment_event(
 
         if response.is_error:
             logger.error("Failed to create calendar event: %s %s", response.status_code, response.text)
-            return None
+            if response.status_code in (401, 403):
+                raise CalendarEventError(
+                    "Google rejected the request (insufficient calendar permission). "
+                    "Reconnect your Google account and grant calendar access "
+                    "(the 'calendar.events' scope)."
+                )
+            raise CalendarEventError(
+                f"Google Calendar API error {response.status_code}: {response.text[:300]}"
+            )
 
         event_data = response.json()
-        logger.info("Created calendar event: id=%s summary=%s due=%s", event_data.get("id"), summary[:50], due_date)
+        logger.info("Created calendar event: id=%s due=%s", event_data.get("id"), due_date)
         return event_data
 
+    except CalendarEventError:
+        raise
     except Exception as exc:
         logger.exception("Error creating calendar event: %s", exc)
-        return None
+        raise CalendarEventError(f"Could not reach Google Calendar: {exc}")
 
 def _build_description(
     *,

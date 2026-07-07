@@ -7,6 +7,8 @@ from app.core.logging import setup_logging
 from app.db.session import AsyncSessionLocal
 from app.services.gmail_ingest import process_gmail_push_notification
 from app.services.outlook_ingest import process_outlook_notification
+from app.services.slack_ingest import process_slack_notification
+from app.services.llm_budget import UserBudgetExceeded
 from app.services.redis_streams import ensure_stream_groups, get_redis_client
 from sqlalchemy import text
 
@@ -105,6 +107,18 @@ async def run_normalizer_worker() -> None:
                                     message_id=fields["message_id"],
                                     subscription_id=fields.get("subscription_id", ""),
                                 )
+                        elif provider == "slack":
+                            async with AsyncSessionLocal() as session:
+                                result = await process_slack_notification(
+                                    session,
+                                    redis,
+                                    team_id=fields.get("team_id", ""),
+                                    channel=fields.get("channel", ""),
+                                    event_ts=fields.get("event_ts", ""),
+                                    thread_ts=fields.get("thread_ts", ""),
+                                    slack_user=fields.get("slack_user", ""),
+                                    text_body=fields.get("text", ""),
+                                )
                         else:
                             logger.warning("Unknown provider: %s", provider)
                             result = {"status": "ignored", "reason": f"unknown_provider:{provider}"}
@@ -179,6 +193,13 @@ async def run_extractor_worker() -> None:
 
                         await redis.xack(stream_name, group_name, message_id)
                         logger.info("extractor acked stream_id=%s", message_id)
+                    except UserBudgetExceeded as exc:
+                        # Over the user's daily cap — skip (ack) instead of retrying.
+                        logger.warning(
+                            "extractor skipped (per-user budget) stream_id=%s: %s",
+                            message_id, exc,
+                        )
+                        await redis.xack(stream_name, group_name, message_id)
                     except Exception:
                         logger.exception(
                             "extractor failed stream_id=%s; leaving unacked",
@@ -220,7 +241,7 @@ async def _process_extraction(fields: dict[str, str]) -> dict:
             text(
                 """
                 SELECT subject, body_text, sender_email, sender_name,
-                       recipients, sent_at, thread_id
+                       recipients, sent_at, thread_id, item_type
                 FROM normalized_items
                 WHERE id = :nid
                 """
@@ -240,6 +261,19 @@ async def _process_extraction(fields: dict[str, str]) -> dict:
         all_owner_emails = [
             row["email_address"] for row in accounts_result.mappings().all()
         ]
+        # Treat this item's account-owner identity as "self" too — covers
+        # non-email sources like Slack (slack:<authed_user_id>) so a commitment
+        # the owner made resolves to outbound ("I owe").
+        if account_email and account_email not in all_owner_emails:
+            all_owner_emails.append(account_email)
+
+        user_row = (
+            await db.execute(
+                text("SELECT user_id FROM accounts WHERE id = :aid"),
+                {"aid": account_id},
+            )
+        ).first()
+        user_id = str(user_row[0]) if user_row and user_row[0] else None
 
     # Parse recipients from JSONB.
     recipients = ni_row["recipients"] or []
@@ -264,13 +298,12 @@ async def _process_extraction(fields: dict[str, str]) -> dict:
         "thread_id": ni_row["thread_id"],
     }
 
-    # Run the LangGraph pipeline.
-    logger.info(
-        "Running extraction pipeline for normalized_item=%s subject=%r",
-        normalized_item_id,
-        ni_row["subject"],
-    )
+    # Attribute every LLM call in this extraction (incl. job detection) to the
+    # owning user so the per-user daily budget applies.
+    from app.services.llm_budget import current_user_id
+    current_user_id.set(user_id)
 
+    logger.info("Running extraction pipeline for normalized_item=%s", normalized_item_id)
     final_state = await extraction_graph.ainvoke(initial_state)
 
     stored = final_state.get("stored_commitment_ids", [])
@@ -286,16 +319,32 @@ async def _process_extraction(fields: dict[str, str]) -> dict:
         deduped,
     )
 
-    job_result = await process_job_application_item(
-        normalized_item_id=normalized_item_id,
-        account_id=account_id,
-    )
-    final_state["job_applications_detected"] = job_result.get("applications_detected", 0)
+    # Job-application detection is email-only; skip it for chat messages.
+    if ni_row["item_type"] != "chat_message":
+        job_result = await process_job_application_item(
+            normalized_item_id=normalized_item_id,
+            account_id=account_id,
+        )
+        final_state["job_applications_detected"] = job_result.get("applications_detected", 0)
+
+    # Mark the item processed so it isn't picked up again.
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            await db.execute(
+                text(
+                    "UPDATE normalized_items SET processing_status = 'processed' WHERE id = :nid"
+                ),
+                {"nid": normalized_item_id},
+            )
 
     return final_state
 
 
 def main() -> None:
+    from app.core.observability import init_observability
+
+    init_observability()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("worker", choices=["normalizer", "extractor"])
     args = parser.parse_args()

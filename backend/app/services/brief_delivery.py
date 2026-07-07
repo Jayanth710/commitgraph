@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -9,6 +9,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.daily_briefs import create_daily_brief_run
 from app.services.email_sender import send_email_via_gmail
 from app.services.sms_sender import send_sms_message
+
+# How long after a brief's scheduled time it can still be sent as a catch-up if
+# the scheduler was down at the exact minute. Keeps a missed brief recoverable
+# without firing a stale one hours late.
+CATCHUP_WINDOW = timedelta(hours=6)
+
+
+def _to_time(value) -> time:
+    if isinstance(value, time):
+        return value
+    return time.fromisoformat(str(value)[:8])
+
+
+def _is_brief_due(scheduled_value, local_now: datetime) -> bool:
+    """Due if local time is at or past the scheduled time today, within the
+    catch-up window."""
+    scheduled = _to_time(scheduled_value)
+    scheduled_dt = local_now.replace(
+        hour=scheduled.hour, minute=scheduled.minute, second=0, microsecond=0
+    )
+    return scheduled_dt <= local_now < scheduled_dt + CATCHUP_WINDOW
 
 
 def _clean_nullable_uuid(value):
@@ -121,6 +142,9 @@ async def update_delivery_preference(
         ),
         "account_id": _clean_nullable_uuid(body.get("account_id", current["account_id"])),
         "is_active": body.get("is_active", current["is_active"]),
+        "deadline_reminders_enabled": body.get(
+            "deadline_reminders_enabled", current["deadline_reminders_enabled"]
+        ),
     }
 
     result = await db.execute(
@@ -137,6 +161,7 @@ async def update_delivery_preference(
                 sender_account_id = :sender_account_id,
                 account_id = :account_id,
                 is_active = :is_active,
+                deadline_reminders_enabled = :deadline_reminders_enabled,
                 updated_at = now()
             WHERE user_id = :user_id
             RETURNING *
@@ -181,6 +206,39 @@ async def _already_sent(
               AND brief_type = :brief_type
               AND brief_date = :brief_date
               AND status = 'sent'
+            LIMIT 1
+            """
+        ),
+        {
+            "user_id": user_id,
+            "channel": channel,
+            "brief_type": brief_type,
+            "brief_date": brief_date,
+        },
+    )
+    return result.scalar() is not None
+
+
+async def _has_delivery_run_today(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    channel: str,
+    brief_type: str,
+    brief_date: date,
+) -> bool:
+    """True if a delivery was already attempted today (sent OR failed). Used by
+    the scheduler so a single brief is attempted once per day even across the
+    catch-up window — a failed send isn't retried every cycle."""
+    result = await db.execute(
+        text(
+            """
+            SELECT 1
+            FROM brief_delivery_runs
+            WHERE user_id = :user_id
+              AND channel = :channel
+              AND brief_type = :brief_type
+              AND brief_date = :brief_date
             LIMIT 1
             """
         ),
@@ -282,12 +340,11 @@ async def run_due_brief_deliveries(db: AsyncSession) -> dict[str, int]:
         tz = ZoneInfo(pref["timezone"] or "America/Denver")
         local_now = now_utc.astimezone(tz)
         local_date = local_now.date()
-        current_hm = local_now.strftime("%H:%M")
         due_types: list[str] = []
 
-        if pref["morning_enabled"] and str(pref["morning_time"])[:5] == current_hm:
+        if pref["morning_enabled"] and _is_brief_due(pref["morning_time"], local_now):
             due_types.append("morning")
-        if pref["night_enabled"] and str(pref["night_time"])[:5] == current_hm:
+        if pref["night_enabled"] and _is_brief_due(pref["night_time"], local_now):
             due_types.append("night")
 
         if not due_types:
@@ -299,7 +356,9 @@ async def run_due_brief_deliveries(db: AsyncSession) -> dict[str, int]:
             continue
 
         for brief_type in due_types:
-            if await _already_sent(
+            # Once per day: skip if already sent or already attempted (failed)
+            # today, so the catch-up window doesn't retry a failure every cycle.
+            if await _has_delivery_run_today(
                 db,
                 user_id=str(pref["user_id"]),
                 channel=pref["channel"],

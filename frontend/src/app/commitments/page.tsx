@@ -14,6 +14,7 @@ import {
   CheckCircle,
   CalendarPlus,
   CalendarCheck,
+  CalendarClock,
   Pencil,
   MoreHorizontal,
 } from "lucide-react";
@@ -490,15 +491,44 @@ function CommitmentCard({
   const [calendarLink, setCalendarLink] = useState<string | null>(
     c.calendar_event_link || null,
   );
+  const [localDueDate, setLocalDueDate] = useState<string | null>(c.due_date || null);
+  const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [reminderDate, setReminderDate] = useState("");
+  const [settingReminder, setSettingReminder] = useState(false);
   const [creatingEvent, setCreatingEvent] = useState(false);
   const [removingEvent, setRemovingEvent] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
-  const canAddToCalendar =
-    !!c.due_date &&
-    !calendarCreated &&
-    ["confirmed", "in_progress"].includes(c.status) &&
-    (c.confidence_score ?? 0) >= 0.8;
+  useEffect(() => {
+    setLocalDueDate(c.due_date || null);
+  }, [c.due_date]);
+
+  const isTerminal = c.status === "completed" || c.status === "abandoned";
+  // Exact date present → add it straight to the calendar. No date → let the
+  // user pick one as a reminder. A manual click is the user's authorization,
+  // so the auto-extraction confidence gate doesn't apply.
+  const canAddToCalendar = !!localDueDate && !calendarCreated && !isTerminal;
+  const canAddReminder = !localDueDate && !calendarCreated && !isTerminal;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const handleAddReminder = async () => {
+    if (!reminderDate) return;
+    setSettingReminder(true);
+    try {
+      const result = await api.createCalendarEvent(c.id, reminderDate);
+      setLocalDueDate(reminderDate);
+      setCalendarCreated(true);
+      setCalendarLink(result.event_link || null);
+      setShowReminderPicker(false);
+      toast.success("Reminder added to calendar");
+      window.dispatchEvent(new Event("commitgraph:refresh"));
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Failed to add reminder");
+    } finally {
+      setSettingReminder(false);
+    }
+  };
 
   const toggleEmail = async () => {
     setShowMenu(false);
@@ -540,11 +570,9 @@ function CommitmentCard({
   const urgency =
     c.status === "overdue"
       ? "border-l-red-500"
-      : c.due_date && new Date(c.due_date) < new Date(Date.now() + 48 * 3600000)
+      : localDueDate && new Date(localDueDate) < new Date(Date.now() + 48 * 3600000)
         ? "border-l-amber-400"
         : "border-l-gray-200 dark:border-l-gray-700";
-
-  const isTerminal = c.status === "completed" || c.status === "abandoned";
 
   return (
     <div
@@ -581,8 +609,8 @@ function CommitmentCard({
           )}
 
           <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-gray-400 dark:text-gray-500">
-            {c.due_date && (
-              <span>Due: {new Date(c.due_date).toLocaleDateString()}</span>
+            {localDueDate && (
+              <span>Due: {new Date(localDueDate).toLocaleDateString()}</span>
             )}
             <span>Confidence: {Math.round(c.confidence_score * 100)}%</span>
             {c.commitment_type && (
@@ -644,6 +672,47 @@ function CommitmentCard({
                 <CalendarPlus size={12} />
                 {creatingEvent ? "Creating..." : "Add to Calendar"}
               </button>
+            )}
+
+            {canAddReminder && !showReminderPicker && (
+              <button
+                onClick={() => {
+                  setReminderDate(todayStr);
+                  setShowReminderPicker(true);
+                }}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-amber-50 text-amber-700 dark:bg-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800 transition-colors"
+              >
+                <CalendarClock size={12} />
+                Add reminder with date
+              </button>
+            )}
+
+            {canAddReminder && showReminderPicker && (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={reminderDate}
+                  min={todayStr}
+                  onChange={(e) => setReminderDate(e.target.value)}
+                  className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 px-2 py-1 text-xs"
+                />
+                <button
+                  onClick={handleAddReminder}
+                  disabled={settingReminder || !reminderDate}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+                >
+                  <CalendarClock size={12} />
+                  {settingReminder ? "Adding..." : "Set reminder"}
+                </button>
+                <button
+                  onClick={() => setShowReminderPicker(false)}
+                  disabled={settingReminder}
+                  className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  aria-label="Cancel reminder"
+                >
+                  <X size={12} />
+                </button>
+              </div>
             )}
 
             {calendarCreated && calendarLink && (

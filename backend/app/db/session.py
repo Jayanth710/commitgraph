@@ -5,7 +5,11 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-connect_args = {}
+# Neon's connection pooler (pgbouncer) reuses server connections, so asyncpg's
+# prepared-statement cache can hold plans that break after a schema change
+# (InvalidCachedStatementError). Disabling the cache is Neon's recommended
+# setting for the pooled endpoint.
+connect_args = {"statement_cache_size": 0}
 if settings.app_env == "production":
     ssl_ctx = ssl_module.create_default_context()
     connect_args["ssl"] = ssl_ctx

@@ -133,7 +133,14 @@ async def upsert_job_application(
         if deleted_match:
             return {"status": "skipped_deleted", "id": deleted_match["id"]}
 
-    last_status_at = _parse_dt(event_date) or _parse_dt(date_applied) or datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if existing:
+        # On an update, the timestamp must reflect this email, not the original
+        # apply date — falling back to date_applied would push "Last update"
+        # backwards when a later email restates the original applied date.
+        last_status_at = _parse_dt(event_date) or now
+    else:
+        last_status_at = _parse_dt(event_date) or _parse_dt(date_applied) or now
 
     if existing:
         result = await db.execute(

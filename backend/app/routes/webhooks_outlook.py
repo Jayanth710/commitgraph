@@ -20,10 +20,12 @@ import logging
 from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import PlainTextResponse
 
+from app.core.config import get_settings
 from app.services.redis_streams import get_redis_client
 
 router = APIRouter(prefix="/api/webhooks", tags=["outlook-webhooks"])
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 @router.post("/outlook", status_code=status.HTTP_202_ACCEPTED)
@@ -56,7 +58,12 @@ async def outlook_webhook(
         for notification in notifications:
             resource = notification.get("resource", "")
             change_type = notification.get("changeType", "")
-            # client_state = notification.get("clientState", "")
+
+            # Reject forged notifications: the clientState must match the secret
+            # we set when creating the subscription.
+            if notification.get("clientState") != settings.effective_outlook_client_state:
+                logger.warning("Outlook notification rejected: clientState mismatch")
+                continue
 
             # Extract the message ID from the resource path.
             # Resource looks like: "me/messages/{message_id}"

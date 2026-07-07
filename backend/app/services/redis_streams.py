@@ -176,9 +176,14 @@ async def check_redis_health() -> bool:
             raise
 
 
-async def ensure_stream_groups() -> None:
-    """Create consumer groups if they don't exist."""
-    client = get_redis_client()
+async def ensure_stream_groups(redis=None) -> None:
+    """Create consumer groups if they don't exist.
+
+    Accepts an optional existing client (the workers pass theirs); only closes
+    the client if this function created it.
+    """
+    client = redis or get_redis_client()
+    owns_client = redis is None
     try:
         for stream, group in [
             (settings.stream_ingest_raw, settings.stream_normalizer_group),
@@ -193,7 +198,8 @@ async def ensure_stream_groups() -> None:
                 else:
                     raise
     finally:
-        await client.aclose()
+        if owns_client:
+            await client.aclose()
 
 
 async def publish_ingest_raw_event(

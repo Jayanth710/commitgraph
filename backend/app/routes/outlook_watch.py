@@ -72,7 +72,7 @@ async def outlook_watch_start(email_address: str):
         "notificationUrl": notification_url,
         "resource": "me/mailFolders('inbox')/messages",
         "expirationDateTime": expiry.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
-        "clientState": "commitgraph-outlook-webhook",
+        "clientState": settings.effective_outlook_client_state,
     }
 
     headers = {

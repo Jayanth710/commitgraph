@@ -1,18 +1,13 @@
 "use client";
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import {
-  getToken,
-  getUser,
-  setAuth,
-  clearAuth,
-} from "@/lib/auth";
+import { getUser, setUser as cacheUser, clearAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 
 type AuthContextType = {
   user: any | null;
   loading: boolean;
-  login: (token: string, user: any) => void;
+  login: (user: any) => void;
   logout: () => void;
 };
 
@@ -35,22 +30,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function checkAuth() {
-      // Small delay to let callback page store token first
-      await new Promise((r) => setTimeout(r, 100));
-
-      const token = getToken();
-      if (!token) {
-        setLoading(false);
-        if (pathname !== "/login" && !pathname.startsWith("/auth/callback")) {
-          router.push("/login");
-        }
-        return;
-      }
-
       try {
+        // The auth cookie (if present) authenticates this request.
         const me = await api.getMe();
         setUser(me);
-        setAuth(token, me);
+        cacheUser(me);
       } catch (error: any) {
         const status = error?.response?.status;
         if (status === 401) {
@@ -60,8 +44,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             router.push("/login");
           }
         } else {
-          // Preserve the cached session on transient timeouts/5xx so a busy backend
-          // doesn't look like a real logout during refresh.
+          // Preserve the cached session on transient timeouts/5xx so a busy
+          // backend doesn't look like a real logout during refresh.
           setUser((prev: any | null) => prev ?? getUser());
           console.error("Auth check failed without a 401; preserving session", error);
         }
@@ -72,13 +56,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, [pathname, router]);
 
-  const login = (token: string, userData: any) => {
-    setAuth(token, userData);
+  const login = (userData: any) => {
+    // The backend already set the httpOnly auth cookie on the login response.
+    cacheUser(userData);
     setUser(userData);
     router.push("/");
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await api.logout();
+    } catch {
+      // Even if the network call fails, clear local state below.
+    }
     clearAuth();
     setUser(null);
     router.push("/login");

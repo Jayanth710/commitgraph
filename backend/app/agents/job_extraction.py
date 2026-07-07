@@ -517,11 +517,7 @@ async def extract_job_applications(
     original_sender = extract_forwarded_sender(body_text)
     effective_sender = original_sender or sender_email
     if original_sender and original_sender != sender_email.lower():
-        logger.info(
-            "Detected forwarded email: using original sender %r instead of %r",
-            original_sender,
-            sender_email,
-        )
+        logger.info("Detected forwarded email: using original sender from forward header")
 
     email_payload = _build_email_payload(
         account_owner_email=account_owner_email,
@@ -536,11 +532,8 @@ async def extract_job_applications(
     # this log tells you immediately whether the sanitizer left anything to work with.
     sanitized_body_preview = sanitize_email_body_for_llm(body_text)
     logger.debug(
-        "Job extraction invoked: subject=%r sender=%r sanitized_body_len=%d preview=%r",
-        subject,
-        effective_sender,
+        "Job extraction invoked: sanitized_body_len=%d",
         len(sanitized_body_preview),
-        sanitized_body_preview[:200],
     )
 
     messages = [
@@ -558,9 +551,8 @@ async def extract_job_applications(
     try:
         parsed = _parse_job_extraction_response(result.content)
         logger.info(
-            "Extracted %d job application updates from subject=%r model=%s cost=$%.6f",
+            "Extracted %d job application updates model=%s cost=$%.6f",
             len(parsed.job_applications),
-            subject,
             result.model,
             result.cost_usd,
         )
@@ -572,9 +564,8 @@ async def extract_job_applications(
             )
             if rejection_heuristic:
                 logger.info(
-                    "Heuristic rejection fallback produced %d job application update(s) for subject=%r",
+                    "Heuristic rejection fallback produced %d job application update(s)",
                     len(rejection_heuristic.job_applications),
-                    subject,
                 )
                 return rejection_heuristic
             heuristic = _heuristic_recruiter_screen_fallback(
@@ -584,18 +575,16 @@ async def extract_job_applications(
             )
             if heuristic:
                 logger.info(
-                    "Heuristic recruiter-screen fallback produced %d job application update(s) for subject=%r",
+                    "Heuristic recruiter-screen fallback produced %d job application update(s)",
                     len(heuristic.job_applications),
-                    subject,
                 )
                 return heuristic
         return parsed
     except (json.JSONDecodeError, ValueError) as first_error:
         logger.warning(
-            "Job extraction invalid JSON on first attempt (model=%s): %s. Raw content preview: %r",
+            "Job extraction invalid JSON on first attempt (model=%s): %s. Retrying...",
             result.model,
             first_error,
-            result.content[:500],
         )
 
     messages.append({"role": "assistant", "content": result.content})
@@ -625,9 +614,8 @@ async def extract_job_applications(
             )
             if rejection_heuristic:
                 logger.info(
-                    "Heuristic rejection fallback produced %d job application update(s) after retry for subject=%r",
+                    "Heuristic rejection fallback produced %d job application update(s) after retry",
                     len(rejection_heuristic.job_applications),
-                    subject,
                 )
                 return rejection_heuristic
             heuristic = _heuristic_recruiter_screen_fallback(
@@ -637,18 +625,16 @@ async def extract_job_applications(
             )
             if heuristic:
                 logger.info(
-                    "Heuristic recruiter-screen fallback produced %d job application update(s) after retry for subject=%r",
+                    "Heuristic recruiter-screen fallback produced %d job application update(s) after retry",
                     len(heuristic.job_applications),
-                    subject,
                 )
                 return heuristic
         return parsed
     except (json.JSONDecodeError, ValueError) as retry_error:
         logger.error(
-            "Job extraction invalid JSON on retry too (model=%s): %s. Raw content preview: %r. Returning empty extraction.",
+            "Job extraction invalid JSON on retry too (model=%s): %s. Returning empty extraction.",
             retry_result.model,
             retry_error,
-            retry_result.content[:500],
         )
         rejection_heuristic = _heuristic_rejection_fallback(
             subject=subject,

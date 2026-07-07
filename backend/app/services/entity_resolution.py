@@ -67,6 +67,10 @@ def canonical_email(email: str) -> str:
     belong to the same person.
     """
     normalized = normalize_email(email)
+    # Non-email identifiers (e.g. Slack/Discord user ids like "slack:U123") have
+    # no "@" — skip the email-specific normalization and match on them as-is.
+    if "@" not in normalized:
+        return normalized
     normalized = strip_plus_tag(normalized)
     normalized = normalize_gmail_dots(normalized)
     return normalized
@@ -188,6 +192,20 @@ async def update_person_last_seen(
     )
 
 
+async def _backfill_display_name(
+    db: AsyncSession,
+    person: dict[str, Any],
+    display_name: str | None,
+) -> None:
+    """Set a person's display name if we now have one and they had none."""
+    if display_name and not person.get("display_name"):
+        await db.execute(
+            text("UPDATE persons SET display_name = :name WHERE id = :pid"),
+            {"name": display_name, "pid": person["id"]},
+        )
+        person["display_name"] = display_name
+
+
 # ---------------------------------------------------------------------------
 # Main resolution function
 # ---------------------------------------------------------------------------
@@ -226,6 +244,7 @@ async def resolve_person(
     person = await find_person_by_email(db, email)
     if person:
         await update_person_last_seen(db, person["id"])
+        await _backfill_display_name(db, person, display_name)
 
         # If this person is the account owner but wasn't flagged yet, fix it.
         if is_self and not person["is_self"]:
@@ -244,6 +263,7 @@ async def resolve_person(
         # Same person, different email variant → add this email as alias.
         await add_email_to_person(db, person_id=str(person["id"]), email=email)
         await update_person_last_seen(db, person["id"])
+        await _backfill_display_name(db, person, display_name)
 
         if is_self and not person["is_self"]:
             await db.execute(

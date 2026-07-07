@@ -1,14 +1,18 @@
 """
-Gmail webhook — receives Pub/Sub push, processes email inline.
+Gmail webhook — receives Pub/Sub push and enqueues for async processing.
 
-In production, we process the email directly in the webhook request
-instead of queuing to Redis. This avoids needing always-on workers.
-Falls back to Redis queue if inline processing fails.
+Queue-primary: the webhook does the minimum (verify the push is genuinely from
+our Pub/Sub subscription, then enqueue to ingest:raw) and acks fast. The
+normalizer/extractor workers do the Gmail fetch + LLM extraction off the
+request path. This keeps the webhook well under any push ack deadline, avoids
+redelivery/duplicate work from slow LLM calls, and matches the model the other
+sources need (Slack's <3s ack, Discord's gateway consumer).
+
+Requires the workers to be running — there is no inline fallback.
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import logging
@@ -17,28 +21,36 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.config import get_settings
-from app.db.session import AsyncSessionLocal
-from app.services.gmail_ingest import process_gmail_push_notification
+from app.services.pubsub_auth import (
+    PubSubAuthError,
+    pubsub_auth_enforced,
+    verify_pubsub_token,
+)
 from app.services.redis_streams import get_redis_client
 
 router = APIRouter(prefix="/api/webhooks", tags=["gmail-webhooks"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
-_webhook_locks: dict[str, asyncio.Lock] = {}
-_webhook_locks_guard = asyncio.Lock()
-
-
-async def _get_webhook_lock(email_address: str) -> asyncio.Lock:
-    async with _webhook_locks_guard:
-        lock = _webhook_locks.get(email_address)
-        if lock is None:
-            lock = asyncio.Lock()
-            _webhook_locks[email_address] = lock
-        return lock
 
 
 @router.post("/gmail", status_code=status.HTTP_200_OK)
 async def gmail_webhook(request: Request):
+    # Verify the push request actually came from our Pub/Sub subscription.
+    if pubsub_auth_enforced():
+        try:
+            await verify_pubsub_token(request.headers.get("Authorization"))
+        except PubSubAuthError as exc:
+            logger.warning("Rejected unauthenticated Gmail webhook: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid pub/sub token",
+            ) from exc
+    else:
+        logger.warning(
+            "Gmail webhook auth is NOT enforced; set PUBSUB_VERIFICATION_EMAIL "
+            "for production"
+        )
+
     body = await request.json()
     message = body.get("message", {})
     data_b64 = message.get("data", "")
@@ -57,47 +69,29 @@ async def gmail_webhook(request: Request):
 
     logger.info("Gmail webhook: email=%s historyId=%s", email_address, history_id)
 
-    lock = await _get_webhook_lock(email_address)
-    async with lock:
-        # Try inline processing first (production mode).
-        if settings.app_env == "production":
-            try:
-                async with AsyncSessionLocal() as session:
-                    result = await process_gmail_push_notification(
-                        session,
-                        None,
-                        email_address=email_address,
-                        latest_history_id=history_id,
-                    )
-                logger.info("Webhook inline processing complete: %s", result)
-                return {"status": "processed", "result": str(result)}
+    # Enqueue and ack fast — the normalizer worker fetches + processes.
+    redis = None
+    try:
+        redis = get_redis_client()
+        await redis.xadd(
+            settings.stream_ingest_raw,
+            {
+                "provider": "gmail",
+                "email_address": email_address,
+                "history_id": history_id,
+                "enqueued_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        logger.info("Queued to ingest:raw: email=%s historyId=%s", email_address, history_id)
+        return {"status": "queued"}
 
-            except Exception:
-                logger.exception("Inline processing failed, falling back to queue")
-                # Fall through to queue below.
-
-        # Queue to Redis (local dev or fallback).
-        redis = None
-        try:
-            redis = get_redis_client()
-            await redis.xadd(
-                settings.stream_ingest_raw,
-                {
-                    "provider": "gmail",
-                    "email_address": email_address,
-                    "history_id": history_id,
-                    "enqueued_at": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-            logger.info("Queued to Redis: email=%s historyId=%s", email_address, history_id)
-            return {"status": "queued"}
-
-        except Exception as exc:
-            logger.exception("Failed to queue Gmail notification")
-            raise HTTPException(
-                status_code=503,
-                detail=f"Gmail webhook processing failed and Redis fallback is unavailable: {exc}",
-            ) from exc
-        finally:
-            if redis is not None:
-                await redis.aclose()
+    except Exception as exc:
+        # Return 503 so Pub/Sub retries the delivery once Redis is back.
+        logger.exception("Failed to enqueue Gmail notification")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gmail webhook enqueue failed: {exc}",
+        ) from exc
+    finally:
+        if redis is not None:
+            await redis.aclose()

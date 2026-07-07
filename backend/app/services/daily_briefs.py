@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.llm import llm_completion
+from app.services.llm_budget import current_user_id
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_row(row) -> dict[str, Any]:
@@ -37,6 +43,92 @@ def _section(title: str, items: list[dict[str, Any]]) -> str:
         detail = item.get("title") or item.get("summary") or item.get("company_name") or "Untitled"
         lines.append(f"  - {detail}")
     return "\n".join(lines)
+
+
+def _fmt_commitment(item: dict[str, Any]) -> str:
+    summary = item.get("summary") or "Untitled commitment"
+    due = item.get("due_date")
+    return f"{summary} (due {str(due)[:10]})" if due else summary
+
+
+def _fmt_job(item: dict[str, Any]) -> str:
+    company = item.get("company_name") or "Unknown company"
+    role = item.get("role_title")
+    status = item.get("status") or "update"
+    detail = item.get("event_summary") or item.get("summary") or ""
+    role_part = f" — {role}" if role else ""
+    tail = f": {detail}" if detail else ""
+    return f"{company}{role_part} [{status}]{tail}"
+
+
+def _fmt_review(item: dict[str, Any]) -> str:
+    return item.get("summary") or item.get("subject") or item.get("reason") or "Item"
+
+
+def _llm_block(label: str, items: list[dict[str, Any]], fmt) -> str:
+    if not items:
+        return f"{label} (0): none"
+    lines = [f"{label} ({len(items)}):"]
+    lines.extend(f"- {fmt(item)}" for item in items)
+    return "\n".join(lines)
+
+
+def _brief_system_prompt(brief_type: str, brief_date: date) -> str:
+    if brief_type == "morning":
+        framing = (
+            "This is a MORNING brief: be forward-looking. Lead the user through what "
+            "to do today in priority order (due items and overdue carryover first, "
+            "then follow-ups they're owed, then active job actions)."
+        )
+    else:
+        framing = (
+            "This is a NIGHT brief: a reflective wrap-up. Cover what got done, what is "
+            "still open, and what is coming tomorrow — calm but forward-looking."
+        )
+    return (
+        "You are a sharp, trusted chief-of-staff writing a daily brief for a busy "
+        "professional who tracks commitments (things they owe or are owed) and job "
+        f"applications. The structured data for {brief_date.isoformat()} is below. "
+        "Write a brief that is genuinely useful, not a data dump.\n\n"
+        f"{framing}\n\n"
+        "Rules:\n"
+        "- The FIRST line must be exactly 'Top priority: <X>', where X is the single most "
+        "important thing to do today — or 'Top priority: Nothing urgent today.' if the day "
+        "is genuinely quiet. No preamble before it. For X, prefer time-sensitive or "
+        "externally-facing items (interview invitations to respond to, deadlines, replies "
+        "owed to people) over routine personal tasks.\n"
+        "- Then a blank line, then 2-5 tight bullets starting with '- '.\n"
+        "- ALWAYS merge every job rejection / closed application into ONE single bullet, no "
+        "matter how many, formatted 'N rejections: A, B, C (no action needed)'. Never split "
+        "rejections across multiple bullets.\n"
+        "- List anything that needs the user to act first, with the concrete next step.\n"
+        "- Be specific: use the real names, companies, and deadlines from the data. NEVER "
+        "invent anything not present. Silently skip empty categories.\n"
+        "- Plain text only — no markdown bold, asterisks, or '#' headers. Under ~140 words, "
+        "warm but efficient."
+    )
+
+
+async def _synthesize_brief_summary(
+    *, brief_type: str, brief_date: date, context_text: str
+) -> str | None:
+    """LLM-written narrative for the brief. Returns None on any failure so the
+    caller can fall back to the deterministic template summary."""
+    try:
+        result = await llm_completion(
+            task="answer_synthesis",
+            messages=[
+                {"role": "system", "content": _brief_system_prompt(brief_type, brief_date)},
+                {"role": "user", "content": context_text},
+            ],
+        )
+    except Exception as exc:
+        logger.warning(
+            "Daily brief LLM synthesis failed (%s); using template summary", exc
+        )
+        return None
+    content = (result.content or "").strip()
+    return content or None
 
 
 async def build_daily_brief_payload(
@@ -318,9 +410,42 @@ async def build_daily_brief_payload(
         f"Today wrapped with {len(new_commitments)} new commitments, {len(completed_today)} completions, and {len(job_updates)} job updates."
     )
 
-    summary_markdown = "\n\n".join(
+    # Deterministic fallback if the LLM is unavailable or over budget.
+    fallback_summary = "\n\n".join(
         [headline] + [_section(section["title"], section["items"]) for section in sections]
     )
+
+    if brief_type == "morning":
+        context_blocks = [
+            _llm_block("Due today", due_today, _fmt_commitment),
+            _llm_block("Overdue (carryover)", overdue, _fmt_commitment),
+            _llm_block("Follow-ups owed to me", important_followups, _fmt_commitment),
+            _llm_block("Active job actions (assessment/interview)", job_actions, _fmt_job),
+        ]
+    else:
+        context_blocks = [
+            _llm_block("New commitments today", new_commitments, _fmt_commitment),
+            _llm_block("Completed today", completed_today, _fmt_commitment),
+            _llm_block("Still overdue", overdue, _fmt_commitment),
+            _llm_block("Needs attention (review queue)", review_items, _fmt_review),
+            _llm_block("Job application updates", job_updates, _fmt_job),
+            _llm_block("Due tomorrow", due_tomorrow, _fmt_commitment),
+        ]
+    context_text = (
+        f"Brief type: {brief_type}\nDate: {brief_date.isoformat()}\n\n"
+        + "\n\n".join(context_blocks)
+    )
+
+    # Attribute the LLM spend to this user (per-user budget guard reads the contextvar).
+    token = current_user_id.set(user_id)
+    try:
+        llm_summary = await _synthesize_brief_summary(
+            brief_type=brief_type, brief_date=brief_date, context_text=context_text
+        )
+    finally:
+        current_user_id.reset(token)
+
+    summary_markdown = llm_summary or fallback_summary
 
     return {
         "brief_type": brief_type,

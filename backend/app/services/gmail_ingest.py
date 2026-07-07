@@ -4,10 +4,8 @@ import json
 import logging
 from typing import Any
 
-from app.services.inline_processor import process_normalized_item_inline
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.config import get_settings
 
 from app.services.gmail_api import (
     GmailApiError,
@@ -19,7 +17,6 @@ from app.services.gmail_normalize import normalize_gmail_source_item
 # from app.services.redis_streams import publish_normalized_event
 from app.services.redis_streams import publish_normalized_event_once
 
-settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
@@ -35,7 +32,6 @@ async def process_gmail_push_notification(
     latest_history_id: str,
 ) -> dict[str, Any]:
     pending_publications: list[dict[str, str]] = []
-    normalized_ids = []  # Collect for post-commit extraction
 
     try:
         async with db.begin():
@@ -108,15 +104,12 @@ async def process_gmail_push_notification(
 
             for message_id in message_ids:
                 idempotency_key = build_idempotency_key(str(account["id"]), message_id)
-                source_already_exists = False
-                should_reextract = True
 
                 existing_source = await _get_source_item_by_idempotency(
                     db, idempotency_key=idempotency_key,
                 )
 
                 if existing_source:
-                    source_already_exists = True
                     skipped += 1
                     source_item_id = str(existing_source["id"])
                     provider_id = str(existing_source["provider_id"])
@@ -144,7 +137,6 @@ async def process_gmail_push_notification(
                         )
                         if fallback_source is None:
                             raise RuntimeError(f"source_item insert lost for message_id={message_id}")
-                        source_already_exists = True
                         skipped += 1
                         source_item_id = str(fallback_source["id"])
                         provider_id = str(fallback_source["provider_id"])
@@ -164,9 +156,6 @@ async def process_gmail_push_notification(
                 if normalized_item is None:
                     raise RuntimeError(f"normalized_item missing for source_item_id={source_item_id}")
 
-                if source_already_exists and normalized_item.get("processing_status") == "processed":
-                    should_reextract = False
-
                 pending_publications.append(
                     {
                         "normalized_item_id": str(normalized_item["id"]),
@@ -177,16 +166,6 @@ async def process_gmail_push_notification(
                         "thread_id": normalized_item["thread_id"] or "",
                     }
                 )
-
-                # Collect for post-commit extraction
-                if should_reextract:
-                    normalized_ids.append((str(normalized_item["id"]), str(account["id"])))
-                else:
-                    logger.info(
-                        "Skipping re-extraction for already-processed normalized_item=%s provider_id=%s",
-                        normalized_item["id"],
-                        provider_id,
-                    )
 
             await _update_account_history_id(
                 db, account_id=str(account["id"]), history_id=latest_history_id,
@@ -201,7 +180,7 @@ async def process_gmail_push_notification(
             inserted, skipped, normalized, emitted,
         )
 
-        if settings.app_env != "production" and redis is not None:
+        if redis is not None:
             for publication in pending_publications:
                 emit_result = await publish_normalized_event_once(
                     redis,
@@ -222,17 +201,6 @@ async def process_gmail_push_notification(
                         publication["normalized_item_id"],
                         emit_result.get("status", "unknown"),
                     )
-
-        # Run inline extraction AFTER commit so data is visible
-        if settings.app_env == "production" and normalized_ids:
-            for nid, aid in normalized_ids:
-                try:
-                    extraction_result = await process_normalized_item_inline(
-                        normalized_item_id=nid, account_id=aid,
-                    )
-                    logger.info("Inline extraction: %s", extraction_result)
-                except Exception:
-                    logger.exception("Inline extraction failed for %s", nid)
 
         return {
             "status": "processed",
