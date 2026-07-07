@@ -1,0 +1,86 @@
+/* CommitGraph marketing/landing styles.
+   Import ONCE in src/app/layout.tsx:
+   import "@/components/marketing/marketing.css"; */
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* fonts: Inter is already imported in globals.css — add JetBrains Mono there:
+   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap'); */
+
+@keyframes cg-rise {
+  from { opacity: 0; transform: translateY(26px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes cg-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes cg-dash {
+  to { stroke-dashoffset: -24; }
+}
+@keyframes cg-dash-slow {
+  to { stroke-dashoffset: -18; }
+}
+
+/* scroll-reveal */
+.cg-landing [data-reveal] {
+  opacity: 0;
+  transform: translateY(30px) scale(0.985);
+  filter: blur(8px);
+  transition:
+    opacity 0.75s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.75s cubic-bezier(0.22, 0.61, 0.36, 1),
+    filter 0.75s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.cg-landing [data-reveal].cg-visible {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+/* card hover lift */
+.cg-card {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.cg-card:hover {
+  box-shadow: 0 20px 55px -22px rgba(59, 130, 246, 0.55);
+  border-color: rgba(96, 165, 250, 0.42) !important;
+}
+
+/* nav section links */
+.cg-navlink {
+  display: inline-block;
+  padding: 8px 12px 5px;
+  font-size: 14px;
+  color: #94a3b8;
+  border-bottom: 2px solid transparent;
+  transition: color 0.25s ease, border-color 0.25s ease;
+}
+.cg-navlink.cg-active {
+  color: #ffffff;
+  border-bottom-color: #3b82f6;
+}
+
+.cg-landing ::selection {
+  background: rgba(59, 130, 246, 0.35);
+}
+
+/* ── responsive ─────────────────────────────────────── */
+@media (max-width: 900px) {
+  .cg-2col { grid-template-columns: 1fr !important; }
+  .cg-row { grid-template-columns: 1fr !important; gap: 24px !important; }
+  .cg-row-flip > div:first-child { order: 2 !important; }
+  .cg-row-flip > div:last-child { order: 1 !important; }
+}
+@media (max-width: 820px) {
+  .cg-navlink { display: none !important; }
+}
+@media (max-width: 680px) {
+  .cg-sec { padding-left: 18px !important; padding-right: 18px !important; }
+  .cg-3col { grid-template-columns: 1fr !important; }
+  .cg-nums { gap: 14px !important; }
+  .cg-card-lg { padding: 28px 22px !important; }
+  .cg-nav { padding: 12px 16px !important; }
+}
