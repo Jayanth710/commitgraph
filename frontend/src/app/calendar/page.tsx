@@ -1,39 +1,112 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import type { CalendarEvent } from "@/lib/types";
 import { ListSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
 import PageTransition from "@/components/PageTransition";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, MapPin, RefreshCw, Users } from "lucide-react";
+import { toast } from "react-toastify";
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   addMonths, subMonths, eachDayOfInterval, format,
-  isSameMonth, isSameDay, isToday, parseISO
+  isSameMonth, isToday, parseISO
 } from "date-fns";
 import { useAccountFilter } from "@/components/AccountFilterProvider";
 
+// Date-only items (commitment due dates, all-day events) are bucketed by their
+// UTC date string to avoid a timezone off-by-one. Timed events bucket by local
+// date.
+function dayKey(day: Date) {
+  return format(day, "yyyy-MM-dd");
+}
+function commitmentDayKey(c: any) {
+  return (c.due_date || "").slice(0, 10);
+}
+function eventDayKey(e: CalendarEvent) {
+  if (!e.start) return "";
+  return e.all_day ? e.start.slice(0, 10) : format(parseISO(e.start), "yyyy-MM-dd");
+}
+function eventTime(e: CalendarEvent) {
+  if (e.all_day || !e.start) return "All day";
+  return format(parseISO(e.start), "h:mmaaa");
+}
+
 export default function CalendarPage() {
   const [commitments, setCommitments] = useState<any[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const {activeAccountId} = useAccountFilter()
+  const { activeAccountId } = useAccountFilter();
+
+  const loadEvents = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (activeAccountId) params.set("account_id", activeAccountId);
+    const data = await api.getCalendarEvents(params.toString());
+    setEvents(data.events || []);
+  }, [activeAccountId]);
 
   useEffect(() => {
-        async function load() {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
       try {
         const params = new URLSearchParams({ limit: "200" });
         if (activeAccountId) params.set("account_id", activeAccountId);
-        const data = await api.getCommitments(params.toString());
-        setCommitments(data.commitments.filter((c: any) => c.due_date));
+        const [commitData] = await Promise.all([
+          api.getCommitments(params.toString()),
+          loadEvents(),
+        ]);
+        if (!cancelled) {
+          setCommitments(commitData.commitments.filter((c: any) => c.due_date));
+        }
       } catch (err) {
         console.error(err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
+      }
+
+      // Quietly pull fresh events from Google in the background, then refresh.
+      try {
+        const syncParams = new URLSearchParams();
+        if (activeAccountId) syncParams.set("account_id", activeAccountId);
+        await api.syncCalendar(syncParams.toString());
+        if (!cancelled) {
+          await loadEvents();
+          setLastSynced(new Date());
+        }
+      } catch {
+        // Silent — the manual Sync button surfaces errors.
       }
     }
     load();
-  }, [activeAccountId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAccountId, loadEvents]);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const params = new URLSearchParams();
+      if (activeAccountId) params.set("account_id", activeAccountId);
+      const result = await api.syncCalendar(params.toString());
+      await loadEvents();
+      setLastSynced(new Date());
+      toast.success(
+        result.events_created > 0
+          ? `Synced ${result.events_created} new event${result.events_created === 1 ? "" : "s"}`
+          : "Calendar up to date",
+      );
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Calendar sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }, [activeAccountId, loadEvents]);
 
   if (loading) return <ListSkeleton count={5} />;
 
@@ -43,14 +116,17 @@ export default function CalendarPage() {
   const calEnd = endOfWeek(monthEnd);
   const days = eachDayOfInterval({ start: calStart, end: calEnd });
 
-  const getCommitmentsForDay = (day: Date) => {
-    return commitments.filter((c) => {
-      const dueDate = parseISO(c.due_date);
-      return isSameDay(dueDate, day);
-    });
+  const commitmentsForDay = (day: Date) => {
+    const key = dayKey(day);
+    return commitments.filter((c) => commitmentDayKey(c) === key);
+  };
+  const eventsForDay = (day: Date) => {
+    const key = dayKey(day);
+    return events.filter((e) => eventDayKey(e) === key);
   };
 
-  const selectedCommitments = selectedDate ? getCommitmentsForDay(selectedDate) : [];
+  const selectedCommitments = selectedDate ? commitmentsForDay(selectedDate) : [];
+  const selectedEvents = selectedDate ? eventsForDay(selectedDate) : [];
 
   const statusDot: Record<string, string> = {
     confirmed: "bg-blue-500",
@@ -69,16 +145,35 @@ export default function CalendarPage() {
     abandoned: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
   };
 
+  const isEmpty = commitments.length === 0 && events.length === 0;
+
   return (
     <PageTransition>
       <>
-        <h2 className="text-2xl font-bold mb-6">Calendar</h2>
+        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+          <h2 className="text-2xl font-bold">Calendar</h2>
+          <div className="flex items-center gap-3">
+            {lastSynced && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                Synced {format(lastSynced, "h:mmaaa")}
+              </span>
+            )}
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+              {syncing ? "Syncing..." : "Sync Google Calendar"}
+            </button>
+          </div>
+        </div>
 
-        {commitments.length === 0 ? (
+        {isEmpty ? (
           <EmptyState
             icon={CalendarDays}
-            title="No due dates"
-            description="Commitments with due dates will appear on the calendar."
+            title="Nothing on the calendar yet"
+            description="Sync your Google Calendar, or add due dates to commitments — both show up here."
           />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -113,16 +208,17 @@ export default function CalendarPage() {
               {/* Day cells */}
               <div className="grid grid-cols-7">
                 {days.map((day) => {
-                  const dayCommitments = getCommitmentsForDay(day);
+                  const dayCommitments = commitmentsForDay(day);
+                  const dayEvents = eventsForDay(day);
                   const inMonth = isSameMonth(day, currentMonth);
                   const today = isToday(day);
-                  const isSelected = selectedDate && isSameDay(day, selectedDate);
+                  const isSelected = selectedDate && dayKey(day) === dayKey(selectedDate);
 
                   return (
                     <button
                       key={day.toISOString()}
                       onClick={() => setSelectedDate(isSelected ? null : day)}
-                      className={`relative min-h-[72px] p-1.5 border border-gray-100 dark:border-gray-800 text-left transition-colors ${
+                      className={`relative min-h-[80px] p-1.5 border border-gray-100 dark:border-gray-800 text-left align-top transition-colors ${
                         !inMonth ? "opacity-30" : ""
                       } ${isSelected ? "bg-blue-50 dark:bg-blue-950" : "hover:bg-gray-50 dark:hover:bg-gray-800"}`}
                     >
@@ -133,54 +229,94 @@ export default function CalendarPage() {
                       }`}>
                         {format(day, "d")}
                       </span>
-                      {dayCommitments.length > 0 && (
-                        <div className="flex flex-wrap gap-0.5">
-                          {dayCommitments.slice(0, 3).map((c) => (
-                            <span
-                              key={c.id}
-                              className={`w-1.5 h-1.5 rounded-full ${statusDot[c.status] || "bg-gray-400"}`}
-                              title={c.summary}
-                            />
-                          ))}
-                          {dayCommitments.length > 3 && (
-                            <span className="text-[9px] text-gray-400">+{dayCommitments.length - 3}</span>
-                          )}
-                        </div>
-                      )}
+
+                      <div className="space-y-0.5">
+                        {dayCommitments.length > 0 && (
+                          <div className="flex flex-wrap gap-0.5">
+                            {dayCommitments.slice(0, 4).map((c) => (
+                              <span
+                                key={c.id}
+                                className={`w-1.5 h-1.5 rounded-full ${statusDot[c.status] || "bg-gray-400"}`}
+                                title={c.summary}
+                              />
+                            ))}
+                            {dayCommitments.length > 4 && (
+                              <span className="text-[9px] text-gray-400">+{dayCommitments.length - 4}</span>
+                            )}
+                          </div>
+                        )}
+
+                        {dayEvents.slice(0, 2).map((e) => (
+                          <div
+                            key={e.id}
+                            title={e.title}
+                            className="truncate rounded-sm bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 px-1 text-[9px] leading-tight"
+                          >
+                            {e.all_day ? "" : `${format(parseISO(e.start!), "ha")} `}{e.title}
+                          </div>
+                        ))}
+                        {dayEvents.length > 2 && (
+                          <div className="text-[9px] text-gray-400">+{dayEvents.length - 2} more</div>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Side panel — selected day's commitments */}
+            {/* Side panel — selected day */}
             <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-5">
               <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">
                 {selectedDate ? format(selectedDate, "EEEE, MMM d") : "Select a date"}
               </h3>
 
               {!selectedDate ? (
-                <p className="text-sm text-gray-400 dark:text-gray-500">Click a date to see commitments due that day.</p>
-              ) : selectedCommitments.length === 0 ? (
-                <p className="text-sm text-gray-400 dark:text-gray-500">No commitments due this day.</p>
+                <p className="text-sm text-gray-400 dark:text-gray-500">Click a date to see events and commitments.</p>
+              ) : selectedEvents.length === 0 && selectedCommitments.length === 0 ? (
+                <p className="text-sm text-gray-400 dark:text-gray-500">Nothing on this day.</p>
               ) : (
-                <div className="space-y-3">
-                  {selectedCommitments.map((c: any) => (
-                    <div key={c.id} className="p-3 rounded-lg border border-gray-100 dark:border-gray-800">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-medium flex-1">{c.summary}</p>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${statusColors[c.status] ?? "bg-gray-100"}`}>
-                          {c.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        {c.direction === "outbound" ? "You →" : "←"} {c.target_email || c.owner_email}
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                        {Math.round(c.confidence_score * 100)}% confidence
-                      </p>
+                <div className="space-y-4">
+                  {selectedEvents.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Google Calendar</p>
+                      {selectedEvents.map((e) => (
+                        <div key={e.id} className="p-3 rounded-lg border border-emerald-100 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/30">
+                          <p className="text-sm font-medium">{e.title}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{eventTime(e)}</p>
+                          {e.location && (
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
+                              <MapPin size={11} /> {e.location}
+                            </p>
+                          )}
+                          {e.attendees.length > 0 && (
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
+                              <Users size={11} /> {e.attendees.length} attendee{e.attendees.length === 1 ? "" : "s"}
+                            </p>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+
+                  {selectedCommitments.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Commitments due</p>
+                      {selectedCommitments.map((c: any) => (
+                        <div key={c.id} className="p-3 rounded-lg border border-gray-100 dark:border-gray-800">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium flex-1">{c.summary}</p>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${statusColors[c.status] ?? "bg-gray-100"}`}>
+                              {c.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {c.direction === "outbound" ? "You →" : "←"} {c.target_email || c.owner_email}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -188,6 +324,10 @@ export default function CalendarPage() {
               <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-800">
                 <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">Legend</p>
                 <div className="flex flex-wrap gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-2 rounded-sm bg-emerald-300 dark:bg-emerald-700" />
+                    <span className="text-xs text-gray-500 dark:text-gray-400">event</span>
+                  </div>
                   {Object.entries(statusDot).map(([status, color]) => (
                     <div key={status} className="flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full ${color}`} />

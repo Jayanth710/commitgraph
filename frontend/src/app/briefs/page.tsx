@@ -9,6 +9,7 @@ import type { DailyBriefRun, DailyBriefType } from "@/lib/types";
 import PageTransition from "@/components/PageTransition";
 import { ListSkeleton } from "@/components/Skeleton";
 import EmptyState from "@/components/EmptyState";
+import BriefDeliverySettings from "@/components/BriefDeliverySettings";
 import { useAccountFilter } from "@/components/AccountFilterProvider";
 
 const SECTION_LABELS: Record<string, string> = {
@@ -234,6 +235,10 @@ export default function BriefsPage() {
             </aside>
           </div>
         )}
+
+        <div className="mt-10 pt-8 border-t border-gray-200 dark:border-gray-800">
+          <BriefDeliverySettings />
+        </div>
       </>
     </PageTransition>
   );

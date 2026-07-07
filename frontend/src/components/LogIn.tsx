@@ -38,7 +38,7 @@ const LogIn: React.FC<LogInProps> = ({ className, setIsLogin, ...props }) => {
     try {
       const response = await api.login({ email: data.email, password: data.password });
       toast.success("Logged in successfully!");
-      login(response.token, response.user);
+      login(response.user);
     } catch (error) {
       if (axios.isAxiosError(error) && error.response) {
         const msg = error.response.data?.detail || "Invalid credentials";
