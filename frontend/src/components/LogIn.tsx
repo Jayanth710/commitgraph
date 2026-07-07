@@ -59,8 +59,9 @@ const LogIn: React.FC<LogInProps> = ({ className, setIsLogin, ...props }) => {
   };
 
   const handleGoogleLogin = () => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-    window.location.href = `${apiUrl}/auth/google-signin/start`;
+    // Same-origin: the /auth/* proxy forwards this to the backend, so the OAuth
+    // cookie is set on this domain (first-party).
+    window.location.href = "/auth/google-signin/start";
   };
 
   return (
