@@ -3,6 +3,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
+import LandingPage from "@/components/marketing/LandingPage";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -29,6 +30,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
+    // Logged-out visitors see the marketing landing at the root, outside the
+    // app chrome (sidebar/topbar). Other routes fall through to /login.
+    if (pathname === "/") {
+      return <LandingPage />;
+    }
     return null;
   }
 

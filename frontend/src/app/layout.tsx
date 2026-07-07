@@ -40,6 +40,7 @@ import AppShell from "@/components/AppShell";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { AccountFilterProvider } from "@/components/AccountFilterProvider";
+import "@/components/marketing/marketing.css";
 
 export const metadata: Metadata = {
   title: "CommitGraph",
