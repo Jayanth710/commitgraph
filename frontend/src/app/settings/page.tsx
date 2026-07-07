@@ -9,8 +9,7 @@ import { toast } from "react-toastify";
 import PageTransition from "@/components/PageTransition";
 import BriefDeliverySettings from "@/components/BriefDeliverySettings";
 
-// Same-origin; /auth and /api are proxied to the backend by next.config rewrites.
-const apiUrl = "";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();

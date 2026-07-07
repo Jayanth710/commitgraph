@@ -1,9 +1,15 @@
-// The JWT now lives in an httpOnly cookie that JavaScript cannot read, so the
-// browser sends it automatically and an XSS payload can't steal it. We only
-// cache the non-sensitive user profile here for a fast initial render; the
-// source of truth for auth is the cookie + GET /auth/me.
+// The JWT is stored in localStorage and sent as an `Authorization: Bearer`
+// header on every API request (see lib/api.ts). A header is sent cross-site with
+// no restrictions, so the Vercel frontend and Cloud Run backend work directly —
+// no cookies, no proxy.
 
+const TOKEN_KEY = "commitgraph_token";
 const USER_KEY = "commitgraph_user";
+
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
 
 export function getUser(): any | null {
   if (typeof window === "undefined") return null;
@@ -11,19 +17,25 @@ export function getUser(): any | null {
   return raw ? JSON.parse(raw) : null;
 }
 
-export function setUser(user: any): void {
+export function setAuth(token: string, user: any): void {
   if (typeof window === "undefined") return;
+  localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearAuth(): void {
   if (typeof window === "undefined") return;
+  localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }
 
-// Routes viewable while logged out. A 401 from the GET /auth/me probe on these
-// paths must NOT redirect to /login — the marketing landing lives at "/", so a
-// logged-out visitor there should see the landing page, not get bounced away.
+export function isAuthenticated(): boolean {
+  return !!getToken();
+}
+
+// Routes viewable while logged out. With no token we must NOT redirect away from
+// these — the marketing landing lives at "/", so a logged-out visitor there
+// should see the landing page, not get bounced to /login.
 export const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms"];
 
 export function isPublicPath(path: string): boolean {

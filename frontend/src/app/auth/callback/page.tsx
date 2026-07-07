@@ -1,14 +1,14 @@
 "use client";
 import { Suspense, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { setUser as cacheUser } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { setAuth } from "@/lib/auth";
 
 function CallbackHandler() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
   useEffect(() => {
+    const token = searchParams.get("token");
     const error = searchParams.get("error");
 
     if (error) {
@@ -16,17 +16,13 @@ function CallbackHandler() {
       return;
     }
 
-    // The backend set the httpOnly auth cookie on the redirect; confirm it by
-    // loading the profile, then proceed.
-    (async () => {
-      try {
-        const me = await api.getMe();
-        cacheUser(me);
-        router.push("/");
-      } catch {
-        router.push("/login?error=auth_failed");
-      }
-    })();
+    if (!token) {
+      router.push("/login?error=no_token");
+      return;
+    }
+
+    setAuth(token, {});
+    router.push("/");
   }, [searchParams, router]);
 
   return (
